@@ -54,7 +54,9 @@ NVR can consume, and keeps every frame on your own network.
 - **Hardware-accelerated codecs** — H.264, H.265 (HEVC), AV1, with automatic fallback to
   H.264 when the selected codec cannot be prepared
 - **Resolutions** from 640×480 up to the camera's maximum (capped at 4K to stay within
-  encoder limits), with bitrate scaled to the resolution
+  encoder limits)
+- **Bitrate** adjustable via slider (500–8000 kbps), live while streaming, in both the
+  app and the web dashboard
 - **Optional audio** — off by default, so the app does not claim the microphone unless
   you ask it to
 - **Background operation** via a foreground service; keeps streaming with the screen off
@@ -225,6 +227,7 @@ cross-origin `Origin` header are rejected with `403`.
 | `flashlight_enabled` | bool | Torch |
 | `night_mode_enabled` | bool | Automatic torch by ambient light |
 | `zoom_level` | float 1.0–8.0 | Camera digital zoom factor |
+| `bitrate_kbps` | int 500–8000 | Video bitrate, applied live while streaming |
 | `force_software` | bool | Prefer the software encoder |
 | `show_preview` | bool | On-device preview overlay |
 | `audio_enabled` | bool | Include microphone audio in the stream |

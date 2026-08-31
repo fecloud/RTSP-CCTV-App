@@ -150,6 +150,22 @@ object AppPreferences {
         prefs(context).edit().putFloat(KEY_ZOOM_LEVEL, zoom.coerceIn(ZOOM_MIN, ZOOM_MAX)).apply()
     }
 
+    // --- Bitrate ---
+    private const val KEY_BITRATE_KBPS = "bitrate_kbps"
+
+    const val BITRATE_MIN_KBPS = 500
+    const val BITRATE_MAX_KBPS = 8000
+    const val DEFAULT_BITRATE_KBPS = 4000
+
+    fun getBitrateKbps(context: Context): Int =
+        prefs(context).getInt(KEY_BITRATE_KBPS, DEFAULT_BITRATE_KBPS).coerceIn(BITRATE_MIN_KBPS, BITRATE_MAX_KBPS)
+
+    fun setBitrateKbps(context: Context, kbps: Int) {
+        prefs(context).edit()
+            .putInt(KEY_BITRATE_KBPS, kbps.coerceIn(BITRATE_MIN_KBPS, BITRATE_MAX_KBPS))
+            .apply()
+    }
+
     // --- Web dashboard security ---
     private const val KEY_WEB_AUTH_ENABLED = "web_auth_enabled"
     private const val KEY_CREDENTIALS_SEEDED = "credentials_seeded"

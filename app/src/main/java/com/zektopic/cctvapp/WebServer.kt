@@ -31,6 +31,7 @@ class WebServer(
     private val getNightModeEnabled: () -> Boolean,
     private val getZoomLevel: () -> Float,
     private val getZoomRange: () -> Pair<Float, Float>,
+    private val getBitrateKbps: () -> Int,
     private val getForceSoftware: () -> Boolean,
     private val getShowPreview: () -> Boolean,
     private val onAuthUpdate: (Boolean, String, String) -> Unit,
@@ -178,6 +179,7 @@ class WebServer(
                 "zoomLevel":${getZoomLevel()},
                 "zoomMin":${getZoomRange().first},
                 "zoomMax":${getZoomRange().second},
+                "bitrateKbps":${getBitrateKbps()},
                 "forceSoftware":${getForceSoftware()},
                 "showPreview":${getShowPreview()},
                 "batteryLevel":${getBatteryLevel()},
@@ -658,6 +660,14 @@ class WebServer(
                     </select>
                 </div>
             </div>
+            <div class="setting-row" style="flex-direction:column; align-items:stretch; gap:8px;">
+                <div style="display:flex; justify-content:space-between;">
+                    <span class="setting-label">Bitrate</span>
+                    <span class="setting-sublabel" id="bitrateValueText">4000 kbps</span>
+                </div>
+                <input type="range" class="range-slider" id="bitrateSlider" min="500" max="8000" step="100" value="4000"
+                       oninput="onBitrateInput(this.value)" onchange="onBitrateChange(this.value)">
+            </div>
             <div class="setting-row">
                 <div>
                     <span class="setting-label">Force Software Codec</span>
@@ -818,6 +828,28 @@ class WebServer(
             fetch('/action/set-setting?key=zoom_level&value=' + encodeURIComponent(parseFloat(v).toFixed(2)), POST);
         }
 
+        // --- Bitrate slider ---
+        const bitrateSlider = document.getElementById('bitrateSlider');
+        const bitrateValueText = document.getElementById('bitrateValueText');
+        let bitrateDragging = false;
+        let bitrateDebounceTimer = null;
+        bitrateSlider.addEventListener('pointerdown', () => { bitrateDragging = true; });
+        bitrateSlider.addEventListener('pointerup', () => { setTimeout(() => { bitrateDragging = false; }, 400); });
+
+        function onBitrateInput(v) {
+            bitrateValueText.textContent = v + ' kbps';
+            clearTimeout(bitrateDebounceTimer);
+            bitrateDebounceTimer = setTimeout(() => pushBitrate(v), 120);
+        }
+        function onBitrateChange(v) {
+            clearTimeout(bitrateDebounceTimer);
+            pushBitrate(v);
+            showToast('Bitrate: ' + v + ' kbps');
+        }
+        function pushBitrate(v) {
+            fetch('/action/set-setting?key=bitrate_kbps&value=' + encodeURIComponent(v), POST);
+        }
+
         // --- Preview auto-refresh ---
         const img = document.getElementById('cam-preview');
         setInterval(() => {
@@ -876,6 +908,10 @@ class WebServer(
                         zoomSlider.max = data.zoomMax;
                         zoomSlider.value = data.zoomLevel;
                         zoomValueText.textContent = Number(data.zoomLevel).toFixed(1) + 'x';
+                    }
+                    if (!bitrateDragging) {
+                        bitrateSlider.value = data.bitrateKbps;
+                        bitrateValueText.textContent = data.bitrateKbps + ' kbps';
                     }
 
                     // Sync auth

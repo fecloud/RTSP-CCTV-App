@@ -64,6 +64,7 @@ class WebServerAuthInstrumentedTest {
             getNightModeEnabled = { false },
             getZoomLevel = { 1.0f },
             getZoomRange = { 1.0f to 8.0f },
+            getBitrateKbps = { 4000 },
             getForceSoftware = { false },
             getShowPreview = { false },
             onAuthUpdate = { _, _, _ -> },

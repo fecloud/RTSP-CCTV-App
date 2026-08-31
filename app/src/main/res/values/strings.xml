@@ -5,6 +5,7 @@
     <string name="video_codec">Video Codec</string>
     <string name="force_software_codec">Force Software Codec</string>
     <string name="resolution">Resolution</string>
+    <string name="bitrate">Bitrate (kbps)</string>
     <string name="switch_camera">Switch Camera</string>
     <string name="show_preview">Show Preview</string>
     <string name="device_ip_address">Device IP Address:</string>

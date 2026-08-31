@@ -88,6 +88,7 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
     @Volatile private var flashlightEnabled = false
     @Volatile private var nightModeEnabled = false
     @Volatile private var zoomLevel: Float = AppPreferences.DEFAULT_ZOOM_LEVEL
+    @Volatile private var bitrateKbps: Int = AppPreferences.DEFAULT_BITRATE_KBPS
     private var isLanternOn = false
     private val mainHandler = Handler(Looper.getMainLooper())
 
@@ -161,6 +162,7 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
         flashlightEnabled = AppPreferences.getFlashlightEnabled(this)
         nightModeEnabled = AppPreferences.getNightModeEnabled(this)
         zoomLevel = AppPreferences.getZoomLevel(this)
+        bitrateKbps = AppPreferences.getBitrateKbps(this)
         webAuthEnabled = AppPreferences.getWebAuthEnabled(this)
         audioEnabled = AppPreferences.getAudioEnabled(this)
 
@@ -275,6 +277,7 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
             getNightModeEnabled = { nightModeEnabled },
             getZoomLevel = { zoomLevel },
             getZoomRange = { currentZoomRangePair() },
+            getBitrateKbps = { bitrateKbps },
             getForceSoftware = { forceSoftware },
             getShowPreview = { showPreview },
             onAuthUpdate = { enabled, username, password ->
@@ -343,6 +346,13 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
                     AppPreferences.setZoomLevel(this, requested)
                     zoomLevel = AppPreferences.getZoomLevel(this)
                     onMain { applyZoom() }
+                }
+            }
+            "bitrate_kbps" -> {
+                value.toIntOrNull()?.let { requested ->
+                    AppPreferences.setBitrateKbps(this, requested)
+                    bitrateKbps = AppPreferences.getBitrateKbps(this)
+                    onMain { applyBitrate() }
                 }
             }
             "force_software" -> {
@@ -586,6 +596,7 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
         // re-read from prefs so this path (and the dashboard/app slider that wrote it)
         // stay in sync across a full-intent restart.
         zoomLevel = AppPreferences.getZoomLevel(this)
+        bitrateKbps = AppPreferences.getBitrateKbps(this)
 
         applyForegroundServiceType()
 
@@ -702,12 +713,9 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
                     }
                 }
 
-                // Dynamic Bitrate Calculation
-                val bitrate = when {
-                    videoWidth >= 1920 -> 4096 * 1024
-                    videoWidth >= 1280 -> 4000 * 1024
-                    else -> 2000 * 1024
-                }
+                // User-configured via the bitrate slider (AppPreferences default 4000
+                // kbps) -- used to be auto-calculated from resolution alone.
+                val bitrate = bitrateKbps * 1024
 
                 // Audio is opt-in. Recording it forces the microphone foreground-service
                 // type and the RECORD_AUDIO grant; a camera-only stream needs neither.
@@ -957,6 +965,24 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
             }
         } catch (e: Exception) {
             Pair(AppPreferences.ZOOM_MIN, AppPreferences.ZOOM_MAX)
+        }
+    }
+
+    /**
+     * Pushes [bitrateKbps] to the live encoder without a stream restart.
+     *
+     * Unlike zoom, bitrate is also a direct `prepareVideo()` parameter (see
+     * `startStream()`), so a full codec/resolution-triggered restart already picks up
+     * the current value on its own -- this on-the-fly setter only matters for the
+     * dashboard/app slider changing bitrate while already streaming.
+     */
+    private fun applyBitrate() {
+        if (!::rtspServerCamera.isInitialized || !rtspServerCamera.isStreaming) return
+        try {
+            rtspServerCamera.setVideoBitrateOnFly(bitrateKbps * 1024)
+            android.util.Log.d("CctvServerService", "Bitrate set to ${bitrateKbps}kbps")
+        } catch (e: Exception) {
+            android.util.Log.e("CctvServerService", "Failed to set bitrate", e)
         }
     }
 
