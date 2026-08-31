@@ -408,6 +408,11 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
         return if (capacity in 0..100) capacity else -1
     }
 
+    private fun isCharging(): Boolean {
+        val batteryManager = getSystemService(Context.BATTERY_SERVICE) as? BatteryManager ?: return false
+        return batteryManager.isCharging
+    }
+
     /**
      * Wi-Fi signal as a percentage, or -1 when it cannot be determined.
      *
@@ -624,6 +629,21 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
                     videoWidth = maxRes.first
                     videoHeight = maxRes.second
                     android.util.Log.d("CctvServerService", "Max resolution detected: ${videoWidth}x${videoHeight}")
+                } else {
+                    // The default is 1080p, but not every sensor (especially a front
+                    // camera) can do that. Clamp down to what the camera actually
+                    // supports rather than handing prepareVideo() a size it will just
+                    // reject -- this session only, the user's stored choice is left
+                    // alone in case a later attempt (or a camera switch) can honour it.
+                    val maxRes = getMaxCameraResolution()
+                    if (videoWidth.toLong() * videoHeight > maxRes.first.toLong() * maxRes.second) {
+                        android.util.Log.w(
+                            "CctvServerService",
+                            "Requested ${videoWidth}x${videoHeight} exceeds camera capability; using ${maxRes.first}x${maxRes.second}"
+                        )
+                        videoWidth = maxRes.first
+                        videoHeight = maxRes.second
+                    }
                 }
 
                 // Dynamic Bitrate Calculation
@@ -781,6 +801,11 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
         }
         if (showTimestamp) {
             parts.add(SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(now))
+        }
+        val batteryLevel = getBatteryLevel()
+        if (batteryLevel >= 0) {
+            val chargingIcon = if (isCharging()) "⚡" else ""
+            parts.add("$chargingIcon🔋$batteryLevel%")
         }
         return parts.joinToString(" ")
     }

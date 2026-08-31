@@ -31,10 +31,10 @@ object AppPreferences {
 
     // --- Resolution ---
     fun getVideoWidth(context: Context): Int =
-        prefs(context).getInt(KEY_VIDEO_WIDTH, 640)
+        prefs(context).getInt(KEY_VIDEO_WIDTH, 1920)
 
     fun getVideoHeight(context: Context): Int =
-        prefs(context).getInt(KEY_VIDEO_HEIGHT, 480)
+        prefs(context).getInt(KEY_VIDEO_HEIGHT, 1080)
 
     fun setResolution(context: Context, width: Int, height: Int) {
         prefs(context).edit()
@@ -91,14 +91,14 @@ object AppPreferences {
     private const val KEY_TIMESTAMP_POSITION = "timestamp_position"
 
     fun getShowTimestamp(context: Context): Boolean =
-        prefs(context).getBoolean(KEY_SHOW_TIMESTAMP, false)
+        prefs(context).getBoolean(KEY_SHOW_TIMESTAMP, true)
 
     fun setShowTimestamp(context: Context, show: Boolean) {
         prefs(context).edit().putBoolean(KEY_SHOW_TIMESTAMP, show).apply()
     }
 
     fun getShowDate(context: Context): Boolean =
-        prefs(context).getBoolean(KEY_SHOW_DATE, false)
+        prefs(context).getBoolean(KEY_SHOW_DATE, true)
 
     fun setShowDate(context: Context, show: Boolean) {
         prefs(context).edit().putBoolean(KEY_SHOW_DATE, show).apply()
@@ -114,7 +114,7 @@ object AppPreferences {
     private const val KEY_TIMESTAMP_SIZE = "timestamp_size"
 
     fun getTimestampSize(context: Context): String =
-        prefs(context).getString(KEY_TIMESTAMP_SIZE, "Medium") ?: "Medium"
+        prefs(context).getString(KEY_TIMESTAMP_SIZE, "Large") ?: "Large"
 
     fun setTimestampSize(context: Context, size: String) {
         prefs(context).edit().putString(KEY_TIMESTAMP_SIZE, size).apply()
@@ -161,14 +161,14 @@ object AppPreferences {
     private const val KEY_CREDENTIALS_SEEDED = "credentials_seeded"
 
     /**
-     * Whether the dashboard on port 8080 requires HTTP Basic auth.
+     * Whether the dashboard on port 8081 requires HTTP Basic auth.
      *
      * Defaults to true: the dashboard exposes the live camera and every setting, so
      * "open to the whole LAN" is not a safe default. Users who want the old behaviour
      * can turn it off in the app or from the dashboard itself.
      */
     fun getWebAuthEnabled(context: Context): Boolean =
-        prefs(context).getBoolean(KEY_WEB_AUTH_ENABLED, true)
+        prefs(context).getBoolean(KEY_WEB_AUTH_ENABLED, false)
 
     fun setWebAuthEnabled(context: Context, enabled: Boolean) {
         prefs(context).edit().putBoolean(KEY_WEB_AUTH_ENABLED, enabled).apply()

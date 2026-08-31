@@ -10,6 +10,7 @@
     <string name="device_ip_address">Device IP Address:</string>
     <string name="stream_url_guide">You can view the stream at rtsp://[YOUR_IP]:8554/stream</string>
     <string name="overlay_permission_toast">Please grant \'Display over other apps\' permission</string>
+    <string name="battery_optimization_toast">Please allow this app to ignore battery optimizations, or Android may kill the camera in the background</string>
     <string name="camera_permission_toast">Camera permission is required to start the server</string>
     <string name="ip_not_available">Not available</string>
 

@@ -13,6 +13,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
 import android.provider.Settings
 import android.widget.ArrayAdapter
 import android.widget.AutoCompleteTextView
@@ -369,8 +370,24 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
+        if (!isIgnoringBatteryOptimizations()) {
+            val intent = Intent(
+                Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                Uri.parse("package:$packageName")
+            )
+            startActivity(intent)
+            updateServerStatus(false)
+            Toast.makeText(this, R.string.battery_optimization_toast, Toast.LENGTH_LONG).show()
+            return
+        }
+
         restartServer()
         updateServerStatus(true)
+    }
+
+    private fun isIgnoringBatteryOptimizations(): Boolean {
+        val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+        return powerManager.isIgnoringBatteryOptimizations(packageName)
     }
 
     private fun restartServer() {
@@ -468,7 +485,7 @@ class MainActivity : AppCompatActivity() {
             } else {
                 binding.textRtspUrl.text = "rtsp://$ip:8554/stream"
             }
-            binding.textWebUrl.text = "http://$ip:8080"
+            binding.textWebUrl.text = "http://$ip:${WebServer.PORT}"
         } else {
             binding.textRtspUrl.text = getString(R.string.ip_not_available)
             binding.textWebUrl.text = getString(R.string.ip_not_available)
@@ -535,7 +552,7 @@ class MainActivity : AppCompatActivity() {
     private fun autoStartServerIfNeeded() {
         if (!AppPreferences.getAutoStartOnLaunch(this)) return
         if (binding.switchServer.isChecked) return
-        if (!allPermissionsGranted() || !Settings.canDrawOverlays(this)) return
+        if (!allPermissionsGranted() || !Settings.canDrawOverlays(this) || !isIgnoringBatteryOptimizations()) return
         binding.switchServer.isChecked = true
     }
 

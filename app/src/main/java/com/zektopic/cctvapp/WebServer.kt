@@ -40,7 +40,7 @@ class WebServer(
     private val getWebAuthEnabled: () -> Boolean,
     /**
      * Port to bind. Defaults to [PORT]; tests pass [EPHEMERAL_PORT] so they get a free
-     * port from the OS instead of colliding with a [CctvServerService] already on 8080.
+     * port from the OS instead of colliding with a [CctvServerService] already on [PORT].
      * Read the real port back from `listeningPort` after [start].
      */
     port: Int = PORT
@@ -770,7 +770,7 @@ class WebServer(
             <div class="setting-row">
                 <div>
                     <span class="setting-label">Secure This Dashboard</span>
-                    <div class="setting-sublabel">Require the username &amp; password above for port 8080 too</div>
+                    <div class="setting-sublabel">Require the username &amp; password above for port 8081 too</div>
                 </div>
                 <label class="toggle">
                     <input type="checkbox" id="toggleWebAuth" onchange="setSetting('web_auth_enabled', this.checked)">
@@ -794,7 +794,7 @@ class WebServer(
             <div class="url-row">
                 <div>
                     <div class="url-label">Web Dashboard</div>
-                    <div class="url-value">http://$safeIp:8080</div>
+                    <div class="url-value">http://$safeIp:$PORT</div>
                 </div>
             </div>
         </div>

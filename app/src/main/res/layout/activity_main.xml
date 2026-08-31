@@ -577,7 +577,7 @@
                         android:layout_weight="1"
                         android:fontFamily="monospace"
                         android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
-                        tools:text="http://192.168.1.100:8080" />
+                        tools:text="http://192.168.1.100:8081" />
 
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/btn_copy_web"

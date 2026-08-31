@@ -16,6 +16,10 @@
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <!-- API 33+: without this the foreground-service notification is suppressed. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Lets the app ask to be exempted from battery optimization. A camera that OEM
+         battery management is free to suspend in the background is not a reliable
+         camera, so this is treated as a hard requirement, like the overlay permission. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <uses-feature android:name="android.hardware.camera" android:required="true" />
 

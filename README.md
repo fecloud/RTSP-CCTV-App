@@ -61,7 +61,7 @@ NVR can consume, and keeps every frame on your own network.
 - **Front/back camera switching**, from the app, the dashboard, or the API
 
 ### Monitoring
-- **Web dashboard** on port `8080` — live preview, every setting, battery and Wi-Fi status
+- **Web dashboard** on port `8081` — live preview, every setting, battery and Wi-Fi status
 
 ### Overlays and camera control
 - Timestamp and date overlay, positionable in any corner, three text sizes
@@ -79,7 +79,7 @@ flowchart LR
     CAM --> SNAP[JPEG snapshot loop<br/>throttled when idle]
 
     ENC --> RTSP[RTSP server<br/>:8554]
-    SNAP --> WEB[Web server<br/>:8080]
+    SNAP --> WEB[Web server<br/>:8081]
 
     RTSP --> NVR[VLC / OBS / Frigate / NVR]
     WEB --> BROWSER[Browser dashboard]
@@ -133,7 +133,7 @@ rtsp://<user>:<pass>@<phone-ip>:8554/stream   # with authentication enabled
 | **Home Assistant** | Generic Camera integration, or `go2rtc` |
 | **Frigate** | Add as an `ffmpeg` input under `cameras:` |
 
-The web dashboard lives at `http://<phone-ip>:8080`.
+The web dashboard lives at `http://<phone-ip>:8081`.
 
 ---
 
@@ -159,7 +159,7 @@ This app puts a camera on your network. The defaults are chosen accordingly.
 > - **Never port-forward this app to the internet.** Both servers speak plaintext — RTSP
 >   and HTTP, no TLS. Use a VPN (WireGuard, Tailscale) to reach it from outside.
 > - **Keep dashboard authentication on** unless you are on a network you fully trust.
->   With it off, anyone who can reach port 8080 can watch the camera and change settings.
+>   With it off, anyone who can reach port 8081 can watch the camera and change settings.
 > - **Use a dedicated IoT VLAN or guest network** if your router supports it.
 
 ### Signing key rotation
@@ -182,13 +182,13 @@ rather than a public issue.
 
 ## HTTP API
 
-Base URL `http://<phone-ip>:8080`.
+Base URL `http://<phone-ip>:8081`.
 
 **Authentication.** When the dashboard is secured (the default), every endpoint requires
 HTTP Basic credentials and returns `401` with a `WWW-Authenticate` header otherwise.
 
 ```bash
-curl -u admin:<password> http://192.168.1.50:8080/status
+curl -u admin:<password> http://192.168.1.50:8081/status
 ```
 
 **Verbs.** State-changing endpoints accept `POST` (preferred) and `GET` (kept for
@@ -229,7 +229,7 @@ cross-origin `Origin` header are rejected with `403`.
 | `force_software` | bool | Prefer the software encoder |
 | `show_preview` | bool | On-device preview overlay |
 | `audio_enabled` | bool | Include microphone audio in the stream |
-| `web_auth_enabled` | bool | Require authentication on port 8080 |
+| `web_auth_enabled` | bool | Require authentication on port 8081 |
 
 </details>
 
@@ -241,6 +241,7 @@ cross-origin `Origin` header are rejected with `403`.
 |---|---|---|
 | `CAMERA` | **Yes** | Capturing video. Without it the server will not start. |
 | `SYSTEM_ALERT_WINDOW` | **Yes** | The camera renders into an off-screen overlay surface, which is what keeps encoding alive when the app is not in the foreground. |
+| `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` | **Yes** | Starting the server also asks to be exempted from battery optimization — without it, OEM battery management is free to kill the camera in the background. |
 | `INTERNET`, `ACCESS_NETWORK_STATE` | Yes | Running the local RTSP and HTTP servers, and reporting the device IP. |
 | `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_CAMERA` | Yes | Long-running capture. |
 | `RECORD_AUDIO`, `FOREGROUND_SERVICE_MICROPHONE` | Only with audio on | Audio is opt-in; the microphone type is only claimed when you enable it. |
@@ -333,9 +334,10 @@ open to everyone on the network.
 <details>
 <summary><b>Streaming stops when the screen turns off</b></summary>
 
-Aggressive OEM battery management — worst on Xiaomi/MIUI, Huawei, Oppo and Samsung.
-Disable battery optimisation for the app, and on Xiaomi also enable *Autostart*. See
-[dontkillmyapp.com](https://dontkillmyapp.com) for per-vendor steps.
+Toggling the server on already prompts you to exempt the app from battery optimization —
+make sure you accepted that dialog. Some OEMs (worst on Xiaomi/MIUI, Huawei, Oppo and
+Samsung) still kill the camera in the background regardless; on Xiaomi also enable
+*Autostart*. See [dontkillmyapp.com](https://dontkillmyapp.com) for per-vendor steps.
 </details>
 
 <details>
