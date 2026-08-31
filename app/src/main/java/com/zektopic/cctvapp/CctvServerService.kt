@@ -883,6 +883,7 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
 
                 if (cameraStreamer.prepareVideo(videoWidth, videoHeight, 30, bitrate, 0)) {
                     cameraStreamer.startStream()
+                    if (useCamera1Fallback && cameraStreamerJustConstructed) correctCamera1DefaultFacing()
                     applyTimestampOverlay()
                     activeCodec = videoCodec
                 } else {
@@ -890,6 +891,7 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
                     cameraStreamer.setVideoCodec(VideoCodec.H264)
                     if (cameraStreamer.prepareVideo(videoWidth, videoHeight, 30, bitrate, 0)) {
                          cameraStreamer.startStream()
+                         if (useCamera1Fallback && cameraStreamerJustConstructed) correctCamera1DefaultFacing()
                          applyTimestampOverlay()
                          // Record that THIS session fell back, but do NOT overwrite the
                          // user's stored choice. prepareVideo can fail transiently -- a
@@ -1040,6 +1042,16 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
         }
     }
 
+    /**
+     * Set by [ensureCameraStreamer] when it just constructed a new [cameraStreamer],
+     * and consumed by [startStream] to know whether [correctCamera1DefaultFacing]
+     * needs to run. A field rather than a local/return value because construction
+     * (in [onStartCommand], to check [CameraStreamer.isStreaming]) and the first
+     * `startStream()` call that actually needs to know about it happen in different
+     * functions within the same onStartCommand invocation.
+     */
+    @Volatile private var cameraStreamerJustConstructed = false
+
     /** Lazily creates [cameraStreamer], routed to Camera1 or Camera2 per [useCamera1Fallback]. */
     private fun ensureCameraStreamer() {
         if (::cameraStreamer.isInitialized) return
@@ -1047,6 +1059,44 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
             Camera1Streamer(RtspServerCamera1(openGlView, this, 8554))
         } else {
             Camera2Streamer(RtspServerCamera2(openGlView, this, 8554))
+        }
+        cameraStreamerJustConstructed = true
+    }
+
+    /**
+     * Works around a RootEncoder 2.7.2 bug in `Camera1ApiManager`'s constructor: it
+     * probes both cameras back-to-back to cache their preview-size lists --
+     * `cameraSelect = selectCameraBack(); ...; cameraSelect = selectCameraFront(); ...`
+     * -- and never resets `cameraSelect` afterward, leaving it pointing at the FRONT
+     * camera's index. `Camera1Base.startStream()`'s normal path opens whatever
+     * `cameraSelect` already holds, so every freshly-constructed [Camera1Streamer]
+     * opens on the front camera, confirmed via `dumpsys media.camera`'s "Active Camera
+     * Clients" showing camera ID 1 (FRONT) instead of 0 (BACK) right after a cold
+     * start. `getCameraFacing()`/`isLanternEnabled()`-style introspection can't detect
+     * this from the app side either: a *separate* `facing` field defaults correctly to
+     * BACK and is never touched by the buggy `cameraSelect` path, so it keeps
+     * (incorrectly) reporting BACK even while the front camera is actually live.
+     *
+     * The fix is a single unconditional [CameraStreamer.switchCamera] call right after
+     * the very first successful `startStream()` on a freshly-built [Camera1Streamer]
+     * -- by then the camera is actually open (`onPreview == true` internally), so
+     * `switchCamera()` takes the properly-implemented close-and-reopen-the-other-index
+     * path rather than the no-op-on-the-wrong-field path it'd take before the camera
+     * opens. This mirrors the Camera2 path's existing, unremarkable behavior (always
+     * opens on the back camera after a fresh construction), rather than introducing
+     * new behavior.
+     */
+    private fun correctCamera1DefaultFacing() {
+        // Consume the flag regardless of outcome -- this must only ever be attempted
+        // once per freshly-constructed streamer, or a later legitimate startStream()
+        // call on the same (already-corrected) instance would toggle it right back to
+        // the front camera.
+        cameraStreamerJustConstructed = false
+        try {
+            cameraStreamer.switchCamera()
+            android.util.Log.d("CctvServerService", "Corrected Camera1 default facing (front -> back)")
+        } catch (e: Exception) {
+            android.util.Log.e("CctvServerService", "Failed to correct Camera1 default facing", e)
         }
     }
 
