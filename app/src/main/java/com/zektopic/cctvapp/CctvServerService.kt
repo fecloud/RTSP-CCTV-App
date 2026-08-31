@@ -83,7 +83,6 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
     @Volatile private var webAuthEnabled = true
     @Volatile private var audioEnabled = false
     @Volatile private var showTimestamp = false
-    @Volatile private var showDate = false
     @Volatile private var timestampPosition = "Top Left"
     @Volatile private var timestampSize = "Medium"
     @Volatile private var flashlightEnabled = false
@@ -157,7 +156,6 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
         authUsername = AppPreferences.getUsername(this)
         authPassword = AppPreferences.getPassword(this)
         showTimestamp = AppPreferences.getShowTimestamp(this)
-        showDate = AppPreferences.getShowDate(this)
         timestampPosition = AppPreferences.getTimestampPosition(this)
         timestampSize = AppPreferences.getTimestampSize(this)
         flashlightEnabled = AppPreferences.getFlashlightEnabled(this)
@@ -271,7 +269,6 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
             // toggle snap back to its old value.
             onSettingUpdate = ::handleSettingUpdate,
             getShowTimestamp = { showTimestamp },
-            getShowDate = { showDate },
             getTimestampPosition = { timestampPosition },
             getTimestampSize = { timestampSize },
             getFlashlightEnabled = { flashlightEnabled },
@@ -319,11 +316,6 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
             "show_timestamp" -> {
                 showTimestamp = value.toBoolean()
                 AppPreferences.setShowTimestamp(this, showTimestamp)
-                onMain { applyTimestampOverlay() }
-            }
-            "show_date" -> {
-                showDate = value.toBoolean()
-                AppPreferences.setShowDate(this, showDate)
                 onMain { applyTimestampOverlay() }
             }
             "timestamp_position" -> {
@@ -411,6 +403,75 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
     private fun isCharging(): Boolean {
         val batteryManager = getSystemService(Context.BATTERY_SERVICE) as? BatteryManager ?: return false
         return batteryManager.isCharging
+    }
+
+    /**
+     * Battery temperature in Celsius, or null if unavailable.
+     *
+     * Unlike CPU temperature, this is a proper documented API: `EXTRA_TEMPERATURE` on
+     * the `ACTION_BATTERY_CHANGED` sticky broadcast, in tenths of a degree. Passing a
+     * null receiver to `registerReceiver` just reads the last sticky broadcast instead
+     * of actually registering a listener, so there's nothing to unregister later.
+     */
+    private fun getBatteryTemperatureCelsius(): Float? {
+        val stickyIntent = registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED)) ?: return null
+        val tenths = stickyIntent.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, Int.MIN_VALUE)
+        return if (tenths == Int.MIN_VALUE) null else tenths / 10f
+    }
+
+    /**
+     * Best-effort peak CPU core temperature in Celsius, or null when unavailable.
+     *
+     * There is no permission-free public API for this: `HardwarePropertiesManager`'s
+     * `getDeviceTemperatures()` still requires the system-signature `DEVICE_POWER`
+     * permission despite being nominally "open" since API 29, and `PowerManager` only
+     * exposes a coarse thermal-status enum, not a number. This reads the kernel's
+     * thermal-zone sysfs nodes directly instead -- no Android permission needed, but
+     * whether a zone is even readable, and which zone (if any) is actually the CPU, is
+     * entirely up to the device's kernel/SELinux policy, so this fails silently (and
+     * unpredictably device-to-device) rather than being a reliable cross-device API.
+     */
+    private fun getCpuTemperatureCelsius(): Float? {
+        val zones = java.io.File("/sys/class/thermal").listFiles { f ->
+            f.name.startsWith("thermal_zone")
+        } ?: return null
+
+        val readings = zones.mapNotNull { zone ->
+            try {
+                val type = java.io.File(zone, "type").readText().trim().lowercase(Locale.ROOT)
+                // "-hw-trip-" zones (seen on Qualcomm SoCs, e.g. "cpu-hw-trip-0") report
+                // the configured throttling threshold, not a live sensor reading -- a
+                // static ~95 C that swamped every real core reading (~48-51 C) once both
+                // matched "cpu" and this took the max across zones.
+                if ("cpu" !in type || "trip" in type) return@mapNotNull null
+                val raw = java.io.File(zone, "temp").readText().trim().toFloatOrNull()
+                    ?: return@mapNotNull null
+                // The kernel thermal sysfs ABI specifies millidegrees Celsius, full
+                // stop -- no per-device unit guessing. A previous version tried to
+                // detect "already in Celsius" by checking for a small raw value, which
+                // misread an unpopulated/dummy zone's near-zero millidegree reading
+                // (e.g. raw 95 == 0.095 C) as a literal 95 C. The sanity range below
+                // only guards against garbage reads far outside anything physically
+                // plausible; it does not by itself distinguish a dummy zone's
+                // near-zero-but-in-range value from a real one -- that's handled by
+                // taking the max across every matched zone, so a genuine CPU zone's
+                // reading wins over a dummy zone's whenever both exist.
+                val celsius = raw / 1000f
+                celsius.takeIf { it in -20f..120f }
+            } catch (e: Exception) {
+                null
+            }
+        }
+
+        if (readings.isEmpty()) {
+            android.util.Log.d(
+                "CctvServerService",
+                "No plausible CPU thermal zone reading; zones seen: " + zones.joinToString {
+                    runCatching { java.io.File(it, "type").readText().trim() }.getOrDefault(it.name)
+                }
+            )
+        }
+        return readings.maxOrNull()
     }
 
     /**
@@ -516,7 +577,6 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
         val newAuthUsername = intent?.getStringExtra("auth_username") ?: AppPreferences.getUsername(this)
         val newAuthPassword = intent?.getStringExtra("auth_password") ?: AppPreferences.getPassword(this)
         val newShowTimestamp = intent?.getBooleanExtra("show_timestamp", AppPreferences.getShowTimestamp(this)) ?: false
-        val newShowDate = intent?.getBooleanExtra("show_date", AppPreferences.getShowDate(this)) ?: false
         val newTimestampPosition = intent?.getStringExtra("timestamp_position") ?: AppPreferences.getTimestampPosition(this)
         val newTimestampSize = intent?.getStringExtra("timestamp_size") ?: AppPreferences.getTimestampSize(this)
         audioEnabled = intent?.getBooleanExtra("audio_enabled", AppPreferences.getAudioEnabled(this))
@@ -545,11 +605,9 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
                 }
                 // Update overlay settings even without full restart
                 showTimestamp = newShowTimestamp
-                showDate = newShowDate
                 timestampPosition = newTimestampPosition
                 timestampSize = newTimestampSize
                 AppPreferences.setShowTimestamp(this, showTimestamp)
-                AppPreferences.setShowDate(this, showDate)
                 AppPreferences.setTimestampPosition(this, timestampPosition)
                 AppPreferences.setTimestampSize(this, timestampSize)
                 applyTimestampOverlay()
@@ -578,11 +636,9 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
 
         // Update overlay settings
         showTimestamp = newShowTimestamp
-        showDate = newShowDate
         timestampPosition = newTimestampPosition
         timestampSize = newTimestampSize
         AppPreferences.setShowTimestamp(this, showTimestamp)
-        AppPreferences.setShowDate(this, showDate)
         AppPreferences.setTimestampPosition(this, timestampPosition)
         AppPreferences.setTimestampSize(this, timestampSize)
 
@@ -720,7 +776,7 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
     }
 
     private fun applyTimestampOverlay() {
-        if (!showTimestamp && !showDate) {
+        if (!showTimestamp) {
             timestampHandler.removeCallbacks(timestampRunnable)
             textFilter = null
             return
@@ -742,10 +798,15 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
             // distorted, and -- since even "Top Left" left the box spanning almost to
             // the horizontal centre -- reading as parked in the middle of the screen.
             // These are small enough to hug a corner instead.
+            // Widened from the original 8/11/15: the overlay text now also carries
+            // battery/CPU readouts, roughly doubling its typical character count, and
+            // the box is a fixed percentage of the frame regardless of string length
+            // (see applyTimestampOverlay), so it needs more room or the extra text
+            // just gets squeezed into the same width.
             val scaleW = when (timestampSize) {
-                "Small" -> 8f
-                "Large" -> 15f
-                else -> 11f
+                "Small" -> 14f
+                "Large" -> 26f
+                else -> 19f
             }
             val scaleH = when (timestampSize) {
                 "Small" -> 2.5f
@@ -777,7 +838,7 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
 
     private fun updateTimestampText() {
         val filter = textFilter ?: return
-        if (!showTimestamp && !showDate) return
+        if (!showTimestamp) return
         try {
             filter.setText(buildTimestampString(), getOverlayFontSize(), Color.WHITE, Typeface.DEFAULT_BOLD)
         } catch (e: Exception) {
@@ -796,16 +857,27 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
     private fun buildTimestampString(): String {
         val now = Date()
         val parts = mutableListOf<String>()
-        if (showDate) {
-            parts.add(SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(now))
-        }
         if (showTimestamp) {
+            parts.add(SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(now))
             parts.add(SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(now))
         }
         val batteryLevel = getBatteryLevel()
         if (batteryLevel >= 0) {
-            val chargingIcon = if (isCharging()) "⚡" else ""
-            parts.add("$chargingIcon🔋$batteryLevel%")
+            // "⚡" is an older dual-presentation symbol -- VS15 (U+FE0E) forces its
+            // plain-text glyph so it renders white like the rest of the overlay
+            // instead of the color emoji glyph. "🔋" has no such text glyph in any
+            // font (it's an emoji-only codepoint), so VS15 does nothing for it and
+            // it always renders as a full-color icon -- dropped in favor of the
+            // plain "%" reading, which stays white no matter what.
+            val chargingIcon = if (isCharging()) "⚡︎" else ""
+            // Battery temp rides in the same part as the charge level (no separate
+            // "BATT" label) -- position alone makes the grouping obvious, and every
+            // character here was making the fixed-width overlay box more cramped.
+            val batteryTemp = getBatteryTemperatureCelsius()?.let { " %.0f°C".format(Locale.getDefault(), it) } ?: ""
+            parts.add("$chargingIcon$batteryLevel%$batteryTemp")
+        }
+        getCpuTemperatureCelsius()?.let { temp ->
+            parts.add("%.0f°C".format(Locale.getDefault(), temp))
         }
         return parts.joinToString(" ")
     }

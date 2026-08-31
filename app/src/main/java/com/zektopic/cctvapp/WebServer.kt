@@ -25,7 +25,6 @@ class WebServer(
     // New setting callbacks
     private val onSettingUpdate: (String, String) -> Unit,
     private val getShowTimestamp: () -> Boolean,
-    private val getShowDate: () -> Boolean,
     private val getTimestampPosition: () -> String,
     private val getTimestampSize: () -> String,
     private val getFlashlightEnabled: () -> Boolean,
@@ -172,7 +171,6 @@ class WebServer(
                 "username":"${escapeJson(username)}",
                 "rtspUrl":"${escapeJson(rtspUrl)}",
                 "showTimestamp":${getShowTimestamp()},
-                "showDate":${getShowDate()},
                 "timestampPosition":"${getTimestampPosition()}",
                 "timestampSize":"${getTimestampSize()}",
                 "flashlightEnabled":${getFlashlightEnabled()},
@@ -683,16 +681,9 @@ class WebServer(
         <div class="settings-card">
             <h3>Overlay</h3>
             <div class="setting-row">
-                <span class="setting-label">Show Timestamp</span>
+                <span class="setting-label">Show Date &amp; Time</span>
                 <label class="toggle">
                     <input type="checkbox" id="toggleTimestamp" onchange="setSetting('show_timestamp', this.checked)">
-                    <span class="toggle-track"></span>
-                </label>
-            </div>
-            <div class="setting-row">
-                <span class="setting-label">Show Date</span>
-                <label class="toggle">
-                    <input type="checkbox" id="toggleDate" onchange="setSetting('show_date', this.checked)">
                     <span class="toggle-track"></span>
                 </label>
             </div>
@@ -876,7 +867,6 @@ class WebServer(
                     document.getElementById('toggleForceSoftware').checked = data.forceSoftware;
                     document.getElementById('togglePreview').checked = data.showPreview;
                     document.getElementById('toggleTimestamp').checked = data.showTimestamp;
-                    document.getElementById('toggleDate').checked = data.showDate;
                     document.getElementById('posSelect').value = data.timestampPosition;
                     document.getElementById('sizeSelect').value = data.timestampSize;
                     document.getElementById('toggleFlashlight').checked = data.flashlightEnabled;

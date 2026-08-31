@@ -55,7 +55,6 @@ class BootReceiver : BroadcastReceiver() {
             putExtra("auth_username", AppPreferences.getUsername(context))
             putExtra("auth_password", AppPreferences.getPassword(context))
             putExtra("show_timestamp", AppPreferences.getShowTimestamp(context))
-            putExtra("show_date", AppPreferences.getShowDate(context))
             putExtra("timestamp_position", AppPreferences.getTimestampPosition(context))
             putExtra("timestamp_size", AppPreferences.getTimestampSize(context))
             putExtra("flashlight_enabled", AppPreferences.getFlashlightEnabled(context))

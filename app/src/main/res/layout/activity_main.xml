@@ -372,15 +372,6 @@
                     android:text="@string/show_timestamp"
                     android:textAppearance="@style/TextAppearance.Material3.BodyLarge" />
 
-                <!-- Show Date Toggle -->
-                <com.google.android.material.materialswitch.MaterialSwitch
-                    android:id="@+id/switch_date"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="4dp"
-                    android:text="@string/show_date"
-                    android:textAppearance="@style/TextAppearance.Material3.BodyLarge" />
-
                 <!-- Overlay Position Dropdown -->
                 <com.google.android.material.textfield.TextInputLayout
                     android:id="@+id/menu_overlay_position"

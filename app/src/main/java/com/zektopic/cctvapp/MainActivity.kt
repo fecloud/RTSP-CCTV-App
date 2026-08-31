@@ -124,7 +124,6 @@ class MainActivity : AppCompatActivity() {
 
         // Load saved overlay settings
         binding.switchTimestamp.isChecked = AppPreferences.getShowTimestamp(this)
-        binding.switchDate.isChecked = AppPreferences.getShowDate(this)
         val savedPosition = AppPreferences.getTimestampPosition(this)
         (binding.spinnerOverlayPosition as? AutoCompleteTextView)?.setText(
             if (savedPosition in overlayPositions) savedPosition else overlayPositions.first(), false
@@ -232,11 +231,6 @@ class MainActivity : AppCompatActivity() {
         // Overlay listeners
         binding.switchTimestamp.setOnCheckedChangeListener { _, isChecked ->
             AppPreferences.setShowTimestamp(this, isChecked)
-            restartServer()
-        }
-
-        binding.switchDate.setOnCheckedChangeListener { _, isChecked ->
-            AppPreferences.setShowDate(this, isChecked)
             restartServer()
         }
 
@@ -404,7 +398,6 @@ class MainActivity : AppCompatActivity() {
             putExtra("auth_username", binding.editUsername.text.toString())
             putExtra("auth_password", binding.editPassword.text.toString())
             putExtra("show_timestamp", binding.switchTimestamp.isChecked)
-            putExtra("show_date", binding.switchDate.isChecked)
             putExtra("timestamp_position", binding.spinnerOverlayPosition.text.toString())
             putExtra("timestamp_size", binding.spinnerOverlaySize.text.toString())
             putExtra("flashlight_enabled", binding.switchFlashlight.isChecked)

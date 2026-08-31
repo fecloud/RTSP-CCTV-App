@@ -219,8 +219,7 @@ cross-origin `Origin` header are rejected with `403`.
 
 | Key | Type | Meaning |
 |---|---|---|
-| `show_timestamp` | bool | Timestamp overlay |
-| `show_date` | bool | Date overlay |
+| `show_timestamp` | bool | Date &amp; time overlay |
 | `timestamp_position` | `Top Left` \| `Top Right` \| `Bottom Left` \| `Bottom Right` | Overlay corner |
 | `timestamp_size` | `Small` \| `Medium` \| `Large` | Overlay text size |
 | `flashlight_enabled` | bool | Torch |

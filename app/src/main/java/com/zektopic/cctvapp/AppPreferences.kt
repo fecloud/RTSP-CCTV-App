@@ -86,8 +86,9 @@ object AppPreferences {
     }
 
     // --- Timestamp Overlay ---
+    // A single switch now controls the whole overlay (date+time together) --
+    // it used to be two independent switches (KEY_SHOW_DATE was the other).
     private const val KEY_SHOW_TIMESTAMP = "show_timestamp"
-    private const val KEY_SHOW_DATE = "show_date"
     private const val KEY_TIMESTAMP_POSITION = "timestamp_position"
 
     fun getShowTimestamp(context: Context): Boolean =
@@ -95,13 +96,6 @@ object AppPreferences {
 
     fun setShowTimestamp(context: Context, show: Boolean) {
         prefs(context).edit().putBoolean(KEY_SHOW_TIMESTAMP, show).apply()
-    }
-
-    fun getShowDate(context: Context): Boolean =
-        prefs(context).getBoolean(KEY_SHOW_DATE, true)
-
-    fun setShowDate(context: Context, show: Boolean) {
-        prefs(context).edit().putBoolean(KEY_SHOW_DATE, show).apply()
     }
 
     fun getTimestampPosition(context: Context): String =

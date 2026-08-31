@@ -58,7 +58,6 @@ class WebServerAuthInstrumentedTest {
             getPassword = { password },
             onSettingUpdate = { _, _ -> },
             getShowTimestamp = { false },
-            getShowDate = { false },
             getTimestampPosition = { "Top Left" },
             getTimestampSize = { "Medium" },
             getFlashlightEnabled = { false },
