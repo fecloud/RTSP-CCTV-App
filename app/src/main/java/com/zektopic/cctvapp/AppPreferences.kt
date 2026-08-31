@@ -132,6 +132,19 @@ object AppPreferences {
         prefs(context).edit().putBoolean(KEY_NIGHT_MODE_ENABLED, enabled).apply()
     }
 
+    // --- Vertical Flip ---
+    // For cameras mounted upside-down (e.g. hung from a ceiling bracket). Flips
+    // preview, RTSP stream and dashboard snapshot together since all three render
+    // off the same GL surface.
+    private const val KEY_VERTICAL_FLIP_ENABLED = "vertical_flip_enabled"
+
+    fun getVerticalFlipEnabled(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_VERTICAL_FLIP_ENABLED, false)
+
+    fun setVerticalFlipEnabled(context: Context, enabled: Boolean) {
+        prefs(context).edit().putBoolean(KEY_VERTICAL_FLIP_ENABLED, enabled).apply()
+    }
+
     // --- Zoom ---
     private const val KEY_ZOOM_LEVEL = "zoom_level"
 

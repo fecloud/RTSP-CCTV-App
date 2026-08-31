@@ -45,6 +45,7 @@
     <string name="section_camera_controls">Camera Controls</string>
     <string name="flashlight_toggle">Flashlight</string>
     <string name="night_mode_toggle">Night Mode (Auto Flash)</string>
+    <string name="vertical_flip_toggle">Vertical Flip (Upside-Down Mount)</string>
     <string name="zoom_level">Zoom</string>
     <string name="zoom_level_hint">Actual zoom is limited by your camera\'s hardware</string>
 

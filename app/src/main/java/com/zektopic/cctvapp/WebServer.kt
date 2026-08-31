@@ -29,6 +29,7 @@ class WebServer(
     private val getTimestampSize: () -> String,
     private val getFlashlightEnabled: () -> Boolean,
     private val getNightModeEnabled: () -> Boolean,
+    private val getVerticalFlipEnabled: () -> Boolean,
     private val getZoomLevel: () -> Float,
     private val getZoomRange: () -> Pair<Float, Float>,
     private val getBitrateKbps: () -> Int,
@@ -176,6 +177,7 @@ class WebServer(
                 "timestampSize":"${getTimestampSize()}",
                 "flashlightEnabled":${getFlashlightEnabled()},
                 "nightModeEnabled":${getNightModeEnabled()},
+                "verticalFlipEnabled":${getVerticalFlipEnabled()},
                 "zoomLevel":${getZoomLevel()},
                 "zoomMin":${getZoomRange().first},
                 "zoomMax":${getZoomRange().second},
@@ -740,6 +742,16 @@ class WebServer(
                     <span class="toggle-track"></span>
                 </label>
             </div>
+            <div class="setting-row">
+                <div>
+                    <span class="setting-label">Vertical Flip</span>
+                    <div class="setting-sublabel">For a camera mounted upside-down</div>
+                </div>
+                <label class="toggle">
+                    <input type="checkbox" id="toggleVerticalFlip" onchange="setSetting('vertical_flip_enabled', this.checked)">
+                    <span class="toggle-track"></span>
+                </label>
+            </div>
             <div class="setting-row" style="flex-direction:column; align-items:stretch; gap:8px;">
                 <div style="display:flex; justify-content:space-between;">
                     <span class="setting-label">Zoom</span>
@@ -903,6 +915,7 @@ class WebServer(
                     document.getElementById('sizeSelect').value = data.timestampSize;
                     document.getElementById('toggleFlashlight').checked = data.flashlightEnabled;
                     document.getElementById('toggleNightMode').checked = data.nightModeEnabled;
+                    document.getElementById('toggleVerticalFlip').checked = data.verticalFlipEnabled;
                     if (!zoomDragging) {
                         zoomSlider.min = data.zoomMin;
                         zoomSlider.max = data.zoomMax;

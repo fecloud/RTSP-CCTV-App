@@ -127,6 +127,7 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
     @Volatile private var timestampSize = "Medium"
     @Volatile private var flashlightEnabled = false
     @Volatile private var nightModeEnabled = false
+    @Volatile private var verticalFlipEnabled = false
     @Volatile private var zoomLevel: Float = AppPreferences.DEFAULT_ZOOM_LEVEL
     @Volatile private var bitrateKbps: Int = AppPreferences.DEFAULT_BITRATE_KBPS
     private var isLanternOn = false
@@ -201,6 +202,7 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
         timestampSize = AppPreferences.getTimestampSize(this)
         flashlightEnabled = AppPreferences.getFlashlightEnabled(this)
         nightModeEnabled = AppPreferences.getNightModeEnabled(this)
+        verticalFlipEnabled = AppPreferences.getVerticalFlipEnabled(this)
         zoomLevel = AppPreferences.getZoomLevel(this)
         bitrateKbps = AppPreferences.getBitrateKbps(this)
         webAuthEnabled = AppPreferences.getWebAuthEnabled(this)
@@ -236,6 +238,7 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
         }
         openGlView.holder.addCallback(this)
         openGlView.holder.setFixedSize(640, 480)
+        applyVerticalFlip()
 
         webServer = WebServer(this, getIpAddress(),
             imageProvider = {
@@ -315,6 +318,7 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
             getTimestampSize = { timestampSize },
             getFlashlightEnabled = { flashlightEnabled },
             getNightModeEnabled = { nightModeEnabled },
+            getVerticalFlipEnabled = { verticalFlipEnabled },
             getZoomLevel = { zoomLevel },
             getZoomRange = { currentZoomRangePair() },
             getBitrateKbps = { bitrateKbps },
@@ -380,6 +384,11 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
                 nightModeEnabled = value.toBoolean()
                 AppPreferences.setNightModeEnabled(this, nightModeEnabled)
                 onMain { updateNightModeSensor() }
+            }
+            "vertical_flip_enabled" -> {
+                verticalFlipEnabled = value.toBoolean()
+                AppPreferences.setVerticalFlipEnabled(this, verticalFlipEnabled)
+                onMain { applyVerticalFlip() }
             }
             "zoom_level" -> {
                 value.toFloatOrNull()?.let { requested ->
@@ -602,6 +611,13 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
             return START_STICKY
         }
 
+        if (intent?.action == "ACTION_TOGGLE_VERTICAL_FLIP") {
+            verticalFlipEnabled = intent.getBooleanExtra("vertical_flip_enabled", false)
+            AppPreferences.setVerticalFlipEnabled(this, verticalFlipEnabled)
+            applyVerticalFlip()
+            return START_STICKY
+        }
+
         val newVideoCodec = intent?.getStringExtra("video_codec") ?: AppPreferences.getVideoCodec(this)
         val newShowPreview = intent?.getBooleanExtra("show_preview", AppPreferences.getShowPreview(this)) ?: false
         val newWidth = intent?.getIntExtra("width", AppPreferences.getVideoWidth(this)) ?: 640
@@ -680,10 +696,13 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
         // Update flashlight & night mode settings
         val newFlashlightEnabled = intent?.getBooleanExtra("flashlight_enabled", AppPreferences.getFlashlightEnabled(this)) ?: false
         val newNightModeEnabled = intent?.getBooleanExtra("night_mode_enabled", AppPreferences.getNightModeEnabled(this)) ?: false
+        val newVerticalFlipEnabled = intent?.getBooleanExtra("vertical_flip_enabled", AppPreferences.getVerticalFlipEnabled(this)) ?: false
         flashlightEnabled = newFlashlightEnabled
         nightModeEnabled = newNightModeEnabled
+        verticalFlipEnabled = newVerticalFlipEnabled
         AppPreferences.setFlashlightEnabled(this, flashlightEnabled)
         AppPreferences.setNightModeEnabled(this, nightModeEnabled)
+        AppPreferences.setVerticalFlipEnabled(this, verticalFlipEnabled)
 
         if (showPreview != newShowPreview) {
              showPreview = newShowPreview
@@ -695,10 +714,11 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
             startStream()
         }
 
-        // Apply flashlight, night mode and zoom after stream starts
+        // Apply flashlight, night mode, vertical flip and zoom after stream starts
         Handler(Looper.getMainLooper()).postDelayed({
             applyFlashlight()
             updateNightModeSensor()
+            applyVerticalFlip()
             applyZoom()
         }, 1000)
 
@@ -930,6 +950,12 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
             val maxSize = (if (validSizes.isNotEmpty()) validSizes else sizes.toList())
                 .maxByOrNull { it.width * it.height } ?: return Pair(1920, 1080)
             android.util.Log.d("CctvServerService", "Camera max video size: ${maxSize.width}x${maxSize.height}")
+            android.util.Log.d(
+                "CctvServerService",
+                "All SurfaceTexture-compatible sizes: " +
+                    sizes.sortedByDescending { it.width * it.height }
+                        .joinToString { "${it.width}x${it.height}" }
+            )
             return Pair(maxSize.width, maxSize.height)
         } catch (e: Exception) {
             android.util.Log.e("CctvServerService", "Failed to get max resolution", e)
@@ -951,6 +977,24 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
             }
         } catch (e: Exception) {
             android.util.Log.e("CctvServerService", "Failed to toggle flashlight", e)
+        }
+    }
+
+    /**
+     * Flips preview, RTSP stream and dashboard snapshot vertically -- for a camera
+     * mounted upside-down (e.g. a ceiling bracket). All three render off the same GL
+     * surface ([openGlView]), so one flag on it covers every output. Unlike
+     * [applyZoom]/[applyFlashlight], this doesn't need a live camera session: it's a
+     * render-time flag on the view itself, so it's safe to call as soon as
+     * [openGlView] exists.
+     */
+    private fun applyVerticalFlip() {
+        if (!::openGlView.isInitialized) return
+        try {
+            openGlView.setIsPreviewVerticalFlip(verticalFlipEnabled)
+            openGlView.setIsStreamVerticalFlip(verticalFlipEnabled)
+        } catch (e: Exception) {
+            android.util.Log.e("CctvServerService", "Failed to set vertical flip", e)
         }
     }
 

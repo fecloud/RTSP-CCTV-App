@@ -144,6 +144,7 @@ class MainActivity : AppCompatActivity() {
         // Load saved flashlight & night mode settings
         binding.switchFlashlight.isChecked = AppPreferences.getFlashlightEnabled(this)
         binding.switchNightMode.isChecked = AppPreferences.getNightModeEnabled(this)
+        binding.switchVerticalFlip.isChecked = AppPreferences.getVerticalFlipEnabled(this)
         binding.sliderZoomLevel.value = AppPreferences.getZoomLevel(this)
             .coerceIn(binding.sliderZoomLevel.valueFrom, binding.sliderZoomLevel.valueTo)
 
@@ -279,6 +280,17 @@ class MainActivity : AppCompatActivity() {
                 val intent = Intent(this, CctvServerService::class.java).apply {
                     action = "ACTION_TOGGLE_NIGHT_MODE"
                     putExtra("night_mode_enabled", isChecked)
+                }
+                startService(intent)
+            }
+        }
+
+        binding.switchVerticalFlip.setOnCheckedChangeListener { _, isChecked ->
+            AppPreferences.setVerticalFlipEnabled(this, isChecked)
+            if (binding.switchServer.isChecked) {
+                val intent = Intent(this, CctvServerService::class.java).apply {
+                    action = "ACTION_TOGGLE_VERTICAL_FLIP"
+                    putExtra("vertical_flip_enabled", isChecked)
                 }
                 startService(intent)
             }
@@ -430,6 +442,7 @@ class MainActivity : AppCompatActivity() {
             putExtra("timestamp_size", binding.spinnerOverlaySize.text.toString())
             putExtra("flashlight_enabled", binding.switchFlashlight.isChecked)
             putExtra("night_mode_enabled", binding.switchNightMode.isChecked)
+            putExtra("vertical_flip_enabled", binding.switchVerticalFlip.isChecked)
         }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {

@@ -62,6 +62,7 @@ class WebServerAuthInstrumentedTest {
             getTimestampSize = { "Medium" },
             getFlashlightEnabled = { false },
             getNightModeEnabled = { false },
+            getVerticalFlipEnabled = { false },
             getZoomLevel = { 1.0f },
             getZoomRange = { 1.0f to 8.0f },
             getBitrateKbps = { 4000 },
