@@ -410,11 +410,6 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
         return if (capacity in 0..100) capacity else -1
     }
 
-    private fun isCharging(): Boolean {
-        val batteryManager = getSystemService(Context.BATTERY_SERVICE) as? BatteryManager ?: return false
-        return batteryManager.isCharging
-    }
-
     /**
      * Battery temperature in Celsius, or null if unavailable.
      *
@@ -449,24 +444,34 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
         val readings = zones.mapNotNull { zone ->
             try {
                 val type = java.io.File(zone, "type").readText().trim().lowercase(Locale.ROOT)
+                // Zone naming for the SoC/CPU die is not standardized across vendors --
+                // newer Qualcomm SoCs use "cpu0"/"cpu-thermal", but older ones (e.g.
+                // Snapdragon 820, "capricorn") expose only "tsens_tz_sensorN" zones with
+                // no "cpu" substring at all, which silently produced zero readings.
+                val looksLikeCpuZone = "cpu" in type || "tsens" in type
                 // "-hw-trip-" zones (seen on Qualcomm SoCs, e.g. "cpu-hw-trip-0") report
                 // the configured throttling threshold, not a live sensor reading -- a
                 // static ~95 C that swamped every real core reading (~48-51 C) once both
                 // matched "cpu" and this took the max across zones.
-                if ("cpu" !in type || "trip" in type) return@mapNotNull null
+                if (!looksLikeCpuZone || "trip" in type) return@mapNotNull null
                 val raw = java.io.File(zone, "temp").readText().trim().toFloatOrNull()
                     ?: return@mapNotNull null
-                // The kernel thermal sysfs ABI specifies millidegrees Celsius, full
-                // stop -- no per-device unit guessing. A previous version tried to
-                // detect "already in Celsius" by checking for a small raw value, which
-                // misread an unpopulated/dummy zone's near-zero millidegree reading
-                // (e.g. raw 95 == 0.095 C) as a literal 95 C. The sanity range below
-                // only guards against garbage reads far outside anything physically
-                // plausible; it does not by itself distinguish a dummy zone's
-                // near-zero-but-in-range value from a real one -- that's handled by
-                // taking the max across every matched zone, so a genuine CPU zone's
-                // reading wins over a dummy zone's whenever both exist.
-                val celsius = raw / 1000f
+                // The kernel thermal sysfs ABI specifies millidegrees Celsius, and that
+                // holds for everything here except one documented vendor quirk: on
+                // Snapdragon 820/821 ("tsens_tz_sensorN"), the driver reports
+                // decidegrees instead (raw 502 == 50.2 C, not 0.502 C) -- confirmed by
+                // cross-checking against this device's other zones (msm_therm,
+                // emmc_therm, pa_therm0/1, xo_therm_buf), which all read 44-49 C in
+                // whatever's actually normal Celsius while tsens read ~500 raw. This is
+                // keyed to the known "tsens" naming, not a magnitude guess: a previous
+                // version tried to detect "already in Celsius" from the raw value's
+                // size alone and misread an unpopulated/dummy zone's near-zero
+                // millidegree reading (raw 95 == 0.095 C) as a literal 95 C. The sanity
+                // range below only guards against garbage far outside anything
+                // physically plausible; taking the max across every matched zone is
+                // what lets a genuine CPU zone's reading win over a dummy zone's
+                // whenever both exist.
+                val celsius = if ("tsens" in type) raw / 10f else raw / 1000f
                 celsius.takeIf { it in -20f..120f }
             } catch (e: Exception) {
                 null
@@ -871,18 +876,11 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
         }
         val batteryLevel = getBatteryLevel()
         if (batteryLevel >= 0) {
-            // "⚡" is an older dual-presentation symbol -- VS15 (U+FE0E) forces its
-            // plain-text glyph so it renders white like the rest of the overlay
-            // instead of the color emoji glyph. "🔋" has no such text glyph in any
-            // font (it's an emoji-only codepoint), so VS15 does nothing for it and
-            // it always renders as a full-color icon -- dropped in favor of the
-            // plain "%" reading, which stays white no matter what.
-            val chargingIcon = if (isCharging()) "⚡︎" else ""
             // Battery temp rides in the same part as the charge level (no separate
             // "BATT" label) -- position alone makes the grouping obvious, and every
             // character here was making the fixed-width overlay box more cramped.
             val batteryTemp = getBatteryTemperatureCelsius()?.let { " %.0f°C".format(Locale.getDefault(), it) } ?: ""
-            parts.add("$chargingIcon$batteryLevel%$batteryTemp")
+            parts.add("$batteryLevel%$batteryTemp")
         }
         getCpuTemperatureCelsius()?.let { temp ->
             parts.add("%.0f°C".format(Locale.getDefault(), temp))
