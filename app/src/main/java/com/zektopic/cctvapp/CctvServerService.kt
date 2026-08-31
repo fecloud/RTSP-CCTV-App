@@ -34,6 +34,7 @@ import com.pedro.common.VideoCodec
 import com.pedro.encoder.input.gl.render.filters.`object`.TextObjectFilterRender
 import com.pedro.encoder.utils.CodecUtil
 import com.pedro.library.view.OpenGlView
+import com.pedro.rtspserver.RtspServerCamera1
 import com.pedro.rtspserver.RtspServerCamera2
 import java.io.ByteArrayOutputStream
 import java.net.Inet4Address
@@ -98,7 +99,18 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
         }
     }
 
-    private lateinit var rtspServerCamera: RtspServerCamera2
+    private lateinit var cameraStreamer: CameraStreamer
+    /**
+     * Whether this device's back camera is `INFO_SUPPORTED_HARDWARE_LEVEL_LEGACY`.
+     * On those devices Camera2's `StreamConfigurationMap` for `SurfaceTexture` outputs
+     * exposes a smaller size list than the same camera's underlying Camera1 HAL
+     * actually supports (confirmed on a Snapdragon 410 device: Camera2 capped at
+     * 1440x1080 while Camera1's `video-size-values` went up to 1920x1080/4K), so this
+     * routes those devices through [Camera1Streamer]/[RtspServerCamera1] instead.
+     * Computed once and cached for the service's lifetime -- the whole camera pipeline
+     * is torn down in [onDestroy] anyway, so there's nothing to invalidate mid-session.
+     */
+    private val useCamera1Fallback: Boolean by lazy { isLegacyHardwareLevel() }
     private lateinit var openGlView: OpenGlView
     private lateinit var webServer: WebServer
     private lateinit var windowManager: WindowManager
@@ -128,6 +140,16 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
     @Volatile private var flashlightEnabled = false
     @Volatile private var nightModeEnabled = false
     @Volatile private var verticalFlipEnabled = false
+    /**
+     * Guards [restartServiceFully] against being triggered more than once on the same
+     * instance. Without this, e.g. a resolution change and a stop/start toggle
+     * arriving close together each independently call `stopSelf()` and schedule their
+     * own delayed relaunch -- the resulting overlapping teardown/relaunch churn (two
+     * instances both trying to open the same physical camera) crashed the whole
+     * process with a native SIGSEGV on this device, not just the original silent-dead-
+     * stream bug a single restart fixes.
+     */
+    @Volatile private var isRestartingService = false
     @Volatile private var zoomLevel: Float = AppPreferences.DEFAULT_ZOOM_LEVEL
     @Volatile private var bitrateKbps: Int = AppPreferences.DEFAULT_BITRATE_KBPS
     private var isLanternOn = false
@@ -163,8 +185,8 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
 
     private val snapshotRunnable = object : Runnable {
         override fun run() {
-            val streaming = ::rtspServerCamera.isInitialized &&
-                rtspServerCamera.isStreaming && isSurfaceCreated
+            val streaming = ::cameraStreamer.isInitialized &&
+                cameraStreamer.isStreaming && isSurfaceCreated
 
             // Capturing + JPEG-encoding twice a second around the clock is the single
             // biggest battery cost in the app, and most of the time nothing consumes the
@@ -253,9 +275,9 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
             },
             onSwitchCamera = {
                 onMain {
-                    if (::rtspServerCamera.isInitialized) {
+                    if (::cameraStreamer.isInitialized) {
                         try {
-                            rtspServerCamera.switchCamera()
+                            cameraStreamer.switchCamera()
                         } catch (e: Exception) {
                             android.util.Log.e("CctvServerService", "switchCamera failed", e)
                         }
@@ -264,20 +286,29 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
             },
             onStartStream = {
                 onMain {
-                    if (isSurfaceCreated && (!::rtspServerCamera.isInitialized || !rtspServerCamera.isStreaming)) {
-                        startStream()
+                    if (isSurfaceCreated && (!::cameraStreamer.isInitialized || !cameraStreamer.isStreaming)) {
+                        if (useCamera1Fallback && ::cameraStreamer.isInitialized) {
+                            // A Camera1Streamer that already streamed once and was
+                            // stopped can't cleanly restart in place on this hardware
+                            // -- confirmed to fail the same way even with a multi-second
+                            // gap between stop and start, not just a fast automatic
+                            // restart. See restartServiceFully()'s doc comment.
+                            restartServiceFully()
+                        } else {
+                            startStream()
+                        }
                     }
                 }
             },
             onStopStream = {
                 onMain {
-                    if (::rtspServerCamera.isInitialized && rtspServerCamera.isStreaming) {
-                        rtspServerCamera.stopStream()
+                    if (::cameraStreamer.isInitialized && cameraStreamer.isStreaming) {
+                        cameraStreamer.stopStream()
                     }
                 }
             },
             isStreaming = {
-                if (::rtspServerCamera.isInitialized) rtspServerCamera.isStreaming else false
+                if (::cameraStreamer.isInitialized) cameraStreamer.isStreaming else false
             },
             onCodecUpdate = { newCodec ->
                 if (videoCodec != newCodec) {
@@ -332,11 +363,11 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
                 AppPreferences.setUsername(this, username)
                 AppPreferences.setPassword(this, password)
                 onMain {
-                    if (::rtspServerCamera.isInitialized && rtspServerCamera.isStreaming) {
+                    if (::cameraStreamer.isInitialized && cameraStreamer.isStreaming) {
                         if (enabled && username.isNotEmpty() && password.isNotEmpty()) {
-                            rtspServerCamera.getStreamClient().setAuthorization(username, password)
+                            cameraStreamer.getStreamClient().setAuthorization(username, password)
                         } else {
-                            rtspServerCamera.getStreamClient().setAuthorization("", "")
+                            cameraStreamer.getStreamClient().setAuthorization("", "")
                         }
                     }
                 }
@@ -435,11 +466,49 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
 
     /** Restarts an in-flight stream so a changed encoder setting takes effect. Main thread only. */
     private fun restartStreamIfRunning() {
-        if (::rtspServerCamera.isInitialized && rtspServerCamera.isStreaming) {
-            rtspServerCamera.stopStream()
+        if (::cameraStreamer.isInitialized && cameraStreamer.isStreaming) {
+            if (useCamera1Fallback) {
+                // See restartServiceFully()'s doc comment -- an in-place stop+start
+                // races the Camera1 legacy path's GL teardown/reinit on this device.
+                restartServiceFully()
+                return
+            }
+            cameraStreamer.stopStream()
             startStream()
             applyZoom()
         }
+    }
+
+    /**
+     * Fully restarts the service (destroy, then a fresh relaunch) instead of
+     * restarting the stream in-place, for the [useCamera1Fallback] path only.
+     *
+     * Confirmed on a Snapdragon 410 device: an in-process `stopStream()` immediately
+     * followed by a reconfigured `startStream()` on the same [Camera1Streamer]/
+     * `OpenGlView` races Camera1Base's GL context teardown against its reinit --
+     * `OpenGlView.start()` threw `Could not compile shader` and `eglMakeCurrent`
+     * failed with `EGL_BAD_MATCH`, leaving the stream dead (`/shot.jpg` 404) while
+     * `/status` still reported `streaming: true`. A cold app relaunch never hit this
+     * -- a brand new `OpenGlView` gets a brand new GL context instead of reusing one
+     * that just tore down -- so this trades the instant in-place restart for a ~1s
+     * interruption while a fresh instance spins up. The caller must have already
+     * persisted whatever setting triggered this to [AppPreferences] -- the relaunch
+     * intent carries no extras and relies entirely on the fresh `onCreate()` reading
+     * current values back out of preferences, exactly like a boot-time start does.
+     */
+    private fun restartServiceFully() {
+        if (isRestartingService) return
+        isRestartingService = true
+        val relaunchIntent = Intent(applicationContext, CctvServerService::class.java)
+        val appContext = applicationContext
+        mainHandler.postDelayed({
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                appContext.startForegroundService(relaunchIntent)
+            } else {
+                appContext.startService(relaunchIntent)
+            }
+        }, 1000)
+        stopSelf()
     }
 
     private fun hasPermission(permission: String): Boolean =
@@ -578,9 +647,9 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
         }
 
         if (intent?.action == "ACTION_SWITCH_CAMERA") {
-            if (::rtspServerCamera.isInitialized) {
+            if (::cameraStreamer.isInitialized) {
                 try {
-                    rtspServerCamera.switchCamera()
+                    cameraStreamer.switchCamera()
                 } catch (e: Exception) {
                     e.printStackTrace()
                 }
@@ -641,14 +710,20 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
         applyForegroundServiceType()
 
         // Initialize wrapper if needed
-        if (!::rtspServerCamera.isInitialized) {
-             rtspServerCamera = RtspServerCamera2(openGlView, this, 8554)
-        }
+        ensureCameraStreamer()
 
         // If already streaming, check if we need to restart due to config change
-        if (rtspServerCamera.isStreaming) {
+        var needsFullServiceRestart = false
+        if (cameraStreamer.isStreaming) {
             if (videoCodec != newVideoCodec || videoWidth != newWidth || videoHeight != newHeight || forceSoftware != newForceSoftware) {
-                rtspServerCamera.stopStream()
+                if (useCamera1Fallback) {
+                    // See restartServiceFully()'s doc comment -- don't touch the live
+                    // stream in-place here; let it keep running until stopSelf() tears
+                    // it down properly in onDestroy(), then relaunch fresh below.
+                    needsFullServiceRestart = true
+                } else {
+                    cameraStreamer.stopStream()
+                }
             } else {
                 if (showPreview != newShowPreview) {
                      showPreview = newShowPreview
@@ -710,6 +785,13 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
              updateOverlaySize()
         }
 
+        if (needsFullServiceRestart) {
+            // Every setting above is already persisted, so the fresh instance's
+            // onCreate() picks all of it back up on its own.
+            restartServiceFully()
+            return START_STICKY
+        }
+
         if (isSurfaceCreated) {
             startStream()
         }
@@ -729,11 +811,9 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
         if (!isSurfaceCreated || !openGlView.holder.surface.isValid) return
         
         try {
-            if (!::rtspServerCamera.isInitialized) {
-                rtspServerCamera = RtspServerCamera2(openGlView, this, 8554)
-            }
-            
-            if (!rtspServerCamera.isStreaming) {
+            ensureCameraStreamer()
+
+            if (!cameraStreamer.isStreaming) {
                 // Resolve max resolution if needed
                 if (videoWidth == 0 || videoHeight == 0) {
                     val maxRes = getMaxCameraResolution()
@@ -764,9 +844,9 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
                 // Audio is opt-in. Recording it forces the microphone foreground-service
                 // type and the RECORD_AUDIO grant; a camera-only stream needs neither.
                 if (audioEnabled && hasPermission(android.Manifest.permission.RECORD_AUDIO)) {
-                    rtspServerCamera.prepareAudio(64 * 1024, 44100, true, false, false)
+                    cameraStreamer.prepareAudio(64 * 1024, 44100, true, false, false)
                 } else {
-                    rtspServerCamera.disableAudio()
+                    cameraStreamer.disableAudio()
                 }
 
                 // Check and set Codec
@@ -778,7 +858,7 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
                     else -> VideoCodec.H264
                 }
                 
-                rtspServerCamera.setVideoCodec(selectedCodec)
+                cameraStreamer.setVideoCodec(selectedCodec)
                 android.util.Log.d("CctvServerService", "Selected codec: $selectedCodec ($videoCodec)")
 
                 // The "Force Software Codec" switch was previously persisted and even
@@ -789,27 +869,27 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
                 } else {
                     CodecUtil.CodecType.FIRST_COMPATIBLE_FOUND
                 }
-                rtspServerCamera.forceCodecType(codecType, codecType)
+                cameraStreamer.forceCodecType(codecType, codecType)
                 android.util.Log.d("CctvServerService", "Codec type: $codecType")
 
                 // Set authentication
                 if (authEnabled && authUsername.isNotEmpty() && authPassword.isNotEmpty()) {
-                    rtspServerCamera.getStreamClient().setAuthorization(authUsername, authPassword)
+                    cameraStreamer.getStreamClient().setAuthorization(authUsername, authPassword)
                     android.util.Log.d("CctvServerService", "RTSP auth enabled for user: $authUsername")
                 } else {
-                    rtspServerCamera.getStreamClient().setAuthorization("", "")
+                    cameraStreamer.getStreamClient().setAuthorization("", "")
                     android.util.Log.d("CctvServerService", "RTSP auth disabled")
                 }
 
-                if (rtspServerCamera.prepareVideo(videoWidth, videoHeight, 30, bitrate, 0)) {
-                    rtspServerCamera.startStream()
+                if (cameraStreamer.prepareVideo(videoWidth, videoHeight, 30, bitrate, 0)) {
+                    cameraStreamer.startStream()
                     applyTimestampOverlay()
                     activeCodec = videoCodec
                 } else {
                     android.util.Log.w("CctvServerService", "Codec $selectedCodec preparation failed, falling back to H264")
-                    rtspServerCamera.setVideoCodec(VideoCodec.H264)
-                    if (rtspServerCamera.prepareVideo(videoWidth, videoHeight, 30, bitrate, 0)) {
-                         rtspServerCamera.startStream()
+                    cameraStreamer.setVideoCodec(VideoCodec.H264)
+                    if (cameraStreamer.prepareVideo(videoWidth, videoHeight, 30, bitrate, 0)) {
+                         cameraStreamer.startStream()
                          applyTimestampOverlay()
                          // Record that THIS session fell back, but do NOT overwrite the
                          // user's stored choice. prepareVideo can fail transiently -- a
@@ -836,8 +916,8 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
 
         try {
             val filter = TextObjectFilterRender()
-            if (::rtspServerCamera.isInitialized) {
-                rtspServerCamera.getGlInterface().setFilter(filter)
+            if (::cameraStreamer.isInitialized) {
+                cameraStreamer.getGlInterface().setFilter(filter)
             }
 
             val fontSize = getOverlayFontSize()
@@ -927,17 +1007,56 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
         return parts.joinToString(" ")
     }
 
-    private fun getMaxCameraResolution(): Pair<Int, Int> {
+    /**
+     * Picks the camera id [getMaxCameraResolutionCamera2] and [isLegacyHardwareLevel]
+     * both need to agree on -- prefer the back camera rather than whichever id happens
+     * to be first, since on many devices id 0 is not the sensor actually being
+     * streamed, so a capability query could resolve against the wrong camera entirely.
+     */
+    private fun pickCameraId(cameraManager: CameraManager): String? {
+        return cameraManager.cameraIdList.firstOrNull { id ->
+            cameraManager.getCameraCharacteristics(id)
+                .get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_BACK
+        } ?: cameraManager.cameraIdList.firstOrNull()
+    }
+
+    /**
+     * True when the back camera is `INFO_SUPPORTED_HARDWARE_LEVEL_LEGACY` -- see
+     * [useCamera1Fallback]'s doc comment for why that routes streaming through
+     * [Camera1Streamer] instead of the normal Camera2 path. Any failure here (missing
+     * camera service, no cameras, etc.) returns false so the device falls onto the
+     * already-shipped Camera2 path rather than risking a new, unverified one.
+     */
+    private fun isLegacyHardwareLevel(): Boolean {
+        return try {
+            val cameraManager = getSystemService(Context.CAMERA_SERVICE) as CameraManager
+            val cameraId = pickCameraId(cameraManager) ?: return false
+            val level = cameraManager.getCameraCharacteristics(cameraId)
+                .get(CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL)
+            level == CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL_LEGACY
+        } catch (e: Exception) {
+            android.util.Log.e("CctvServerService", "Failed to read hardware level", e)
+            false
+        }
+    }
+
+    /** Lazily creates [cameraStreamer], routed to Camera1 or Camera2 per [useCamera1Fallback]. */
+    private fun ensureCameraStreamer() {
+        if (::cameraStreamer.isInitialized) return
+        cameraStreamer = if (useCamera1Fallback) {
+            Camera1Streamer(RtspServerCamera1(openGlView, this, 8554))
+        } else {
+            Camera2Streamer(RtspServerCamera2(openGlView, this, 8554))
+        }
+    }
+
+    private fun getMaxCameraResolution(): Pair<Int, Int> =
+        if (useCamera1Fallback) getMaxCameraResolutionLegacyCamera1() else getMaxCameraResolutionCamera2()
+
+    private fun getMaxCameraResolutionCamera2(): Pair<Int, Int> {
         try {
             val cameraManager = getSystemService(Context.CAMERA_SERVICE) as CameraManager
-
-            // Prefer the back camera rather than whichever id happens to be first --
-            // on many devices id 0 is not the sensor actually being streamed, so the
-            // "Max" resolution could be resolved from the wrong camera entirely.
-            val cameraId = cameraManager.cameraIdList.firstOrNull { id ->
-                cameraManager.getCameraCharacteristics(id)
-                    .get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_BACK
-            } ?: cameraManager.cameraIdList.firstOrNull() ?: return Pair(1920, 1080)
+            val cameraId = pickCameraId(cameraManager) ?: return Pair(1920, 1080)
 
             val characteristics = cameraManager.getCameraCharacteristics(cameraId)
             val map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
@@ -963,15 +1082,46 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
         }
     }
 
+    /**
+     * [getMaxCameraResolutionCamera2]'s counterpart for `INFO_SUPPORTED_HARDWARE_LEVEL_LEGACY`
+     * devices -- queries the legacy `android.hardware.Camera` API directly (distinct
+     * from RootEncoder's own internal Camera1 capture pipeline), since that's the API
+     * whose reported sizes actually match what [Camera1Streamer] can stream, unlike
+     * Camera2's `StreamConfigurationMap` on these devices (see [useCamera1Fallback]).
+     */
+    @Suppress("DEPRECATION")
+    private fun getMaxCameraResolutionLegacyCamera1(): Pair<Int, Int> {
+        var camera: android.hardware.Camera? = null
+        try {
+            camera = android.hardware.Camera.open()
+            val params = camera.parameters
+            val sizes = params.supportedVideoSizes ?: params.supportedPreviewSizes
+                ?: return Pair(1920, 1080)
+            val maxPixels = 3840 * 2160
+            val validSizes = sizes.filter { it.width.toLong() * it.height <= maxPixels }
+            val maxSize = (if (validSizes.isNotEmpty()) validSizes else sizes.toList())
+                .maxByOrNull { it.width * it.height } ?: return Pair(1920, 1080)
+            android.util.Log.d("CctvServerService", "Legacy Camera1 max video size: ${maxSize.width}x${maxSize.height}")
+            return Pair(maxSize.width, maxSize.height)
+        } catch (e: Exception) {
+            android.util.Log.e("CctvServerService", "Failed to get max resolution (Camera1)", e)
+            return Pair(1920, 1080)
+        } finally {
+            // android.hardware.Camera.open() is an exclusive lock -- must release before
+            // RtspServerCamera1 opens the same physical camera for real streaming.
+            camera?.release()
+        }
+    }
+
     private fun applyFlashlight() {
-        if (!::rtspServerCamera.isInitialized || !rtspServerCamera.isStreaming) return
+        if (!::cameraStreamer.isInitialized || !cameraStreamer.isStreaming) return
         try {
             if (flashlightEnabled && !isLanternOn) {
-                rtspServerCamera.enableLantern()
+                cameraStreamer.enableLantern()
                 isLanternOn = true
                 android.util.Log.d("CctvServerService", "Flashlight ON")
             } else if (!flashlightEnabled && isLanternOn) {
-                rtspServerCamera.disableLantern()
+                cameraStreamer.disableLantern()
                 isLanternOn = false
                 android.util.Log.d("CctvServerService", "Flashlight OFF")
             }
@@ -1004,12 +1154,12 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
      * some devices support less, a few support more.
      */
     private fun applyZoom() {
-        if (!::rtspServerCamera.isInitialized || !rtspServerCamera.isStreaming) return
+        if (!::cameraStreamer.isInitialized || !cameraStreamer.isStreaming) return
         try {
-            val range = rtspServerCamera.zoomRange
-            val clamped = zoomLevel.coerceIn(range.lower, range.upper)
-            rtspServerCamera.zoom = clamped
-            android.util.Log.d("CctvServerService", "Zoom set to $clamped (requested $zoomLevel, range=$range)")
+            val (lower, upper) = cameraStreamer.getZoomRange()
+            val clamped = zoomLevel.coerceIn(lower, upper)
+            cameraStreamer.setZoom(clamped)
+            android.util.Log.d("CctvServerService", "Zoom set to $clamped (requested $zoomLevel, range=[$lower, $upper])")
         } catch (e: Exception) {
             android.util.Log.e("CctvServerService", "Failed to set zoom", e)
         }
@@ -1018,9 +1168,8 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
     /** Real hardware bounds once the camera is open, else the generic AppPreferences bounds. */
     private fun currentZoomRangePair(): Pair<Float, Float> {
         return try {
-            if (::rtspServerCamera.isInitialized && rtspServerCamera.isStreaming) {
-                val r = rtspServerCamera.zoomRange
-                Pair(r.lower, r.upper)
+            if (::cameraStreamer.isInitialized && cameraStreamer.isStreaming) {
+                cameraStreamer.getZoomRange()
             } else {
                 Pair(AppPreferences.ZOOM_MIN, AppPreferences.ZOOM_MAX)
             }
@@ -1038,9 +1187,9 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
      * dashboard/app slider changing bitrate while already streaming.
      */
     private fun applyBitrate() {
-        if (!::rtspServerCamera.isInitialized || !rtspServerCamera.isStreaming) return
+        if (!::cameraStreamer.isInitialized || !cameraStreamer.isStreaming) return
         try {
-            rtspServerCamera.setVideoBitrateOnFly(bitrateKbps * 1024)
+            cameraStreamer.setVideoBitrateOnFly(bitrateKbps * 1024)
             android.util.Log.d("CctvServerService", "Bitrate set to ${bitrateKbps}kbps")
         } catch (e: Exception) {
             android.util.Log.e("CctvServerService", "Failed to set bitrate", e)
@@ -1082,15 +1231,15 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
     }
 
     override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
-        if (::rtspServerCamera.isInitialized && !rtspServerCamera.isStreaming) {
+        if (::cameraStreamer.isInitialized && !cameraStreamer.isStreaming) {
              startStream()
         }
     }
 
     override fun surfaceDestroyed(holder: SurfaceHolder) {
         isSurfaceCreated = false
-        if (::rtspServerCamera.isInitialized && rtspServerCamera.isStreaming) {
-            rtspServerCamera.stopStream()
+        if (::cameraStreamer.isInitialized && cameraStreamer.isStreaming) {
+            cameraStreamer.stopStream()
         }
     }
 
@@ -1102,10 +1251,10 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
         
         webServer.stop()
         
-        if (::rtspServerCamera.isInitialized) { 
+        if (::cameraStreamer.isInitialized) { 
             try {
-                if (rtspServerCamera.isStreaming) {
-                    rtspServerCamera.stopStream()
+                if (cameraStreamer.isStreaming) {
+                    cameraStreamer.stopStream()
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
