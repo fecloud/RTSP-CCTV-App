@@ -41,7 +41,7 @@ android {
 
     defaultConfig {
         applicationId = "com.zektopic.cctvapp"
-        minSdk = 24
+        minSdk = 23
         targetSdk = 36
         // CI overrides these (-PversionCode from the run number, -PversionName from the
         // tag). Android refuses to install a build whose versionCode has not increased,
@@ -65,9 +65,9 @@ android {
 
     buildTypes {
         release {
-            // Kept off deliberately: TensorFlow Lite Task Vision and RootEncoder both
-            // resolve classes reflectively, and a mis-shrunk release only fails at
-            // runtime. Enabling R8 needs a full on-device pass first -- see README roadmap.
+            // Kept off deliberately: RootEncoder resolves classes reflectively, and a
+            // mis-shrunk release only fails at runtime. Enabling R8 needs a full
+            // on-device pass first -- see README roadmap.
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
@@ -107,9 +107,6 @@ dependencies {
     implementation(libs.androidx.constraintlayout)
     implementation(libs.androidx.recyclerview)
     testImplementation(libs.junit)
-    // android.jar's org.json is a stub that throws on every call. Supplying the real
-    // implementation lets EventStore and DetectionEvent be tested on the JVM.
-    testImplementation(libs.json)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
     // NOTE: these two must stay in lockstep. RTSP-Server pins a specific RootEncoder
@@ -120,6 +117,4 @@ dependencies {
     implementation(libs.rootencoder.library)
     implementation(libs.rtsp.server)
     implementation(libs.nanohttpd)
-    implementation(libs.mediapipe.tasks.vision)
-    implementation(libs.mlkit.genai.image.description)
 }

@@ -4,8 +4,6 @@ import android.content.Context
 import android.content.Intent
 import fi.iki.elonen.NanoHTTPD
 import java.io.ByteArrayInputStream
-import java.io.File
-import java.io.FileInputStream
 
 class WebServer(
     private val context: Context,
@@ -32,18 +30,11 @@ class WebServer(
     private val getTimestampSize: () -> String,
     private val getFlashlightEnabled: () -> Boolean,
     private val getNightModeEnabled: () -> Boolean,
+    private val getZoomLevel: () -> Float,
+    private val getZoomRange: () -> Pair<Float, Float>,
     private val getForceSoftware: () -> Boolean,
     private val getShowPreview: () -> Boolean,
-    private val getDetectionEnabled: () -> Boolean,
-    private val getMotionDetectionEnabled: () -> Boolean,
-    private val getObjectDetectionEnabled: () -> Boolean,
-    private val getObjectDetectorReady: () -> Boolean,
     private val onAuthUpdate: (Boolean, String, String) -> Unit,
-    private val listEventsJson: (Long?, Int) -> String,
-    private val getEventJson: (String) -> String?,
-    private val getEventSnapshotFile: (String) -> File?,
-    private val getEventClipFile: (String) -> File?,
-    private val onCreateTestEvent: () -> String,
     private val getBatteryLevel: () -> Int,
     private val getWifiStrength: () -> Int,
     private val getWebAuthEnabled: () -> Boolean,
@@ -56,7 +47,7 @@ class WebServer(
 ) : NanoHTTPD(port) {
 
     companion object {
-        const val PORT = 8080
+        const val PORT = 8081
 
         /** Bind whatever port the OS hands out. Only used by tests. */
         const val EPHEMERAL_PORT = 0
@@ -164,63 +155,6 @@ class WebServer(
             return newFixedLengthResponse(Response.Status.OK, MIME_PLAINTEXT, "Auth Updated")
         }
 
-        if (uri == "/action/create-test-event") {
-            val json = onCreateTestEvent()
-            return newFixedLengthResponse(Response.Status.OK, "application/json", json)
-        }
-
-        if (uri == "/events") {
-            val since = session.parameters["since"]?.firstOrNull()?.toLongOrNull()
-            val limit = session.parameters["limit"]?.firstOrNull()?.toIntOrNull() ?: 100
-            return newFixedLengthResponse(
-                Response.Status.OK, "application/json", listEventsJson(since, limit)
-            )
-        }
-
-        if (uri.startsWith("/events/")) {
-            val parts = uri.trim('/').split('/')
-            if (parts.size >= 2) {
-                val eventId = parts[1]
-
-                if (parts.size == 2) {
-                    val eventJson = getEventJson(eventId)
-                    return if (eventJson != null) {
-                        newFixedLengthResponse(Response.Status.OK, "application/json", eventJson)
-                    } else {
-                        newFixedLengthResponse(Response.Status.NOT_FOUND, MIME_PLAINTEXT, "Event not found")
-                    }
-                }
-
-                if (parts.size == 3 && parts[2] == "snapshot.jpg") {
-                    val snapshotFile = getEventSnapshotFile(eventId)
-                    return if (snapshotFile != null && snapshotFile.exists()) {
-                        newFixedLengthResponse(
-                            Response.Status.OK,
-                            "image/jpeg",
-                            FileInputStream(snapshotFile),
-                            snapshotFile.length()
-                        )
-                    } else {
-                        newFixedLengthResponse(Response.Status.NOT_FOUND, MIME_PLAINTEXT, "Snapshot not found")
-                    }
-                }
-
-                if (parts.size == 3 && parts[2] == "clip.mp4") {
-                    val clipFile = getEventClipFile(eventId)
-                    return if (clipFile != null && clipFile.exists()) {
-                        newFixedLengthResponse(
-                            Response.Status.OK,
-                            "video/mp4",
-                            FileInputStream(clipFile),
-                            clipFile.length()
-                        )
-                    } else {
-                        newFixedLengthResponse(Response.Status.NOT_FOUND, MIME_PLAINTEXT, "Clip not found")
-                    }
-                }
-            }
-        }
-
         // JSON status endpoint
         if (uri == "/status") {
             val streaming = isStreaming()
@@ -243,12 +177,11 @@ class WebServer(
                 "timestampSize":"${getTimestampSize()}",
                 "flashlightEnabled":${getFlashlightEnabled()},
                 "nightModeEnabled":${getNightModeEnabled()},
+                "zoomLevel":${getZoomLevel()},
+                "zoomMin":${getZoomRange().first},
+                "zoomMax":${getZoomRange().second},
                 "forceSoftware":${getForceSoftware()},
                 "showPreview":${getShowPreview()},
-                "detectionEnabled":${getDetectionEnabled()},
-                "motionDetectionEnabled":${getMotionDetectionEnabled()},
-                "objectDetectionEnabled":${getObjectDetectionEnabled()},
-                "objectDetectorReady":${getObjectDetectorReady()},
                 "batteryLevel":${getBatteryLevel()},
                 "wifiStrength":${getWifiStrength()},
                 "webAuthEnabled":${getWebAuthEnabled()}
@@ -556,7 +489,14 @@ class WebServer(
         }
         .toggle input:checked + .toggle-track { background: var(--accent); }
         .toggle input:checked + .toggle-track::before { transform: translateX(20px); }
-        
+
+        /* Range Slider */
+        .range-slider {
+            width: 100%;
+            accent-color: var(--accent);
+            cursor: pointer;
+        }
+
         /* Text Input */
         .text-input {
             background: var(--bg);
@@ -799,43 +739,13 @@ class WebServer(
                     <span class="toggle-track"></span>
                 </label>
             </div>
-        </div>
-
-        <!-- Detection -->
-        <div class="settings-card">
-            <h3>Detection (Object + Motion)</h3>
-            <div class="setting-row">
-                <div>
-                    <span class="setting-label">Enable Detection</span>
-                    <div class="setting-sublabel">Master switch for event detection</div>
+            <div class="setting-row" style="flex-direction:column; align-items:stretch; gap:8px;">
+                <div style="display:flex; justify-content:space-between;">
+                    <span class="setting-label">Zoom</span>
+                    <span class="setting-sublabel" id="zoomValueText">1.0x</span>
                 </div>
-                <label class="toggle">
-                    <input type="checkbox" id="toggleDetectionEnabled" onchange="setSetting('detection_enabled', this.checked)">
-                    <span class="toggle-track"></span>
-                </label>
-            </div>
-            <div class="setting-row">
-                <span class="setting-label">Motion Detection</span>
-                <label class="toggle">
-                    <input type="checkbox" id="toggleMotionDetection" onchange="setSetting('motion_detection_enabled', this.checked)">
-                    <span class="toggle-track"></span>
-                </label>
-            </div>
-            <div class="setting-row">
-                <div>
-                    <span class="setting-label">People/Animal Detection</span>
-                    <div class="setting-sublabel">Uses a TensorFlow Lite model from assets/detect.tflite</div>
-                </div>
-                <label class="toggle">
-                    <input type="checkbox" id="toggleObjectDetection" onchange="setSetting('object_detection_enabled', this.checked)">
-                    <span class="toggle-track"></span>
-                </label>
-            </div>
-            <div class="setting-row">
-                <div>
-                    <span class="setting-label">Model Status</span>
-                    <div class="setting-sublabel" id="detectorStatusText">Waiting…</div>
-                </div>
+                <input type="range" class="range-slider" id="zoomSlider" min="1" max="8" step="0.1" value="1"
+                       oninput="onZoomInput(this.value)" onchange="onZoomChange(this.value)">
             </div>
         </div>
 
@@ -895,6 +805,28 @@ class WebServer(
     <div class="toast" id="toast"></div>
     
     <script>
+        // --- Zoom slider ---
+        const zoomSlider = document.getElementById('zoomSlider');
+        const zoomValueText = document.getElementById('zoomValueText');
+        let zoomDragging = false;
+        let zoomDebounceTimer = null;
+        zoomSlider.addEventListener('pointerdown', () => { zoomDragging = true; });
+        zoomSlider.addEventListener('pointerup', () => { setTimeout(() => { zoomDragging = false; }, 400); });
+
+        function onZoomInput(v) {
+            zoomValueText.textContent = parseFloat(v).toFixed(1) + 'x';
+            clearTimeout(zoomDebounceTimer);
+            zoomDebounceTimer = setTimeout(() => pushZoom(v), 120);
+        }
+        function onZoomChange(v) {
+            clearTimeout(zoomDebounceTimer);
+            pushZoom(v);
+            showToast('Zoom: ' + parseFloat(v).toFixed(1) + 'x');
+        }
+        function pushZoom(v) {
+            fetch('/action/set-setting?key=zoom_level&value=' + encodeURIComponent(parseFloat(v).toFixed(2)), POST);
+        }
+
         // --- Preview auto-refresh ---
         const img = document.getElementById('cam-preview');
         setInterval(() => {
@@ -949,14 +881,13 @@ class WebServer(
                     document.getElementById('sizeSelect').value = data.timestampSize;
                     document.getElementById('toggleFlashlight').checked = data.flashlightEnabled;
                     document.getElementById('toggleNightMode').checked = data.nightModeEnabled;
-                    document.getElementById('toggleDetectionEnabled').checked = data.detectionEnabled;
-                    document.getElementById('toggleMotionDetection').checked = data.motionDetectionEnabled;
-                    document.getElementById('toggleObjectDetection').checked = data.objectDetectionEnabled;
-                    const detectorStatusText = document.getElementById('detectorStatusText');
-                    detectorStatusText.textContent = data.objectDetectorReady
-                        ? 'Detection model loaded'
-                        : 'Model missing: add app/src/main/assets/detect.tflite';
-                    
+                    if (!zoomDragging) {
+                        zoomSlider.min = data.zoomMin;
+                        zoomSlider.max = data.zoomMax;
+                        zoomSlider.value = data.zoomLevel;
+                        zoomValueText.textContent = Number(data.zoomLevel).toFixed(1) + 'x';
+                    }
+
                     // Sync auth
                     document.getElementById('toggleAuth').checked = data.authEnabled;
                     document.getElementById('toggleWebAuth').checked = data.webAuthEnabled;

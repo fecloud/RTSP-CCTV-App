@@ -11,6 +11,8 @@ import android.net.ConnectivityManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.provider.Settings
 import android.widget.ArrayAdapter
 import android.widget.AutoCompleteTextView
@@ -18,6 +20,7 @@ import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import com.google.android.material.slider.Slider
 import com.zektopic.cctvapp.databinding.ActivityMainBinding
 import java.net.Inet4Address
 
@@ -43,6 +46,12 @@ class MainActivity : AppCompatActivity() {
     private val requiredPermissions = arrayOf(Manifest.permission.CAMERA)
 
     private val permissionRequestCode = 100
+
+    // Debounces the zoom slider's live push to the service: a drag fires
+    // addOnChangeListener far more often than a toggle fires its listener, and each
+    // push is a startService() call.
+    private val zoomDebounceHandler = Handler(Looper.getMainLooper())
+    private var zoomDebounceRunnable: Runnable? = null
 
     private val resolutions = arrayOf("640x480", "1280x720", "1920x1080", "Max")
     private val codecs = arrayOf("H264", "H265", "AV1")
@@ -127,14 +136,8 @@ class MainActivity : AppCompatActivity() {
         // Load saved flashlight & night mode settings
         binding.switchFlashlight.isChecked = AppPreferences.getFlashlightEnabled(this)
         binding.switchNightMode.isChecked = AppPreferences.getNightModeEnabled(this)
-
-        // Load detection settings
-        binding.switchDetectionEnabled.isChecked = AppPreferences.getDetectionEnabled(this)
-        binding.switchMotionDetection.isChecked = AppPreferences.getMotionDetectionEnabled(this)
-        binding.switchObjectDetection.isChecked = AppPreferences.getObjectDetectionEnabled(this)
-        binding.sliderMotionSensitivity.value = AppPreferences.getMotionSensitivity(this).toFloat()
-        binding.sliderDetectionCooldown.value =
-            AppPreferences.getDetectionCooldownSeconds(this).toFloat().coerceIn(5f, 120f)
+        binding.sliderZoomLevel.value = AppPreferences.getZoomLevel(this)
+            .coerceIn(binding.sliderZoomLevel.valueFrom, binding.sliderZoomLevel.valueTo)
 
         // Load security & startup settings
         binding.switchWebAuth.isChecked = AppPreferences.getWebAuthEnabled(this)
@@ -278,28 +281,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        binding.switchDetectionEnabled.setOnCheckedChangeListener { _, isChecked ->
-            AppPreferences.setDetectionEnabled(this, isChecked)
-            restartServer()
-        }
-
-        binding.switchMotionDetection.setOnCheckedChangeListener { _, isChecked ->
-            AppPreferences.setMotionDetectionEnabled(this, isChecked)
-            restartServer()
-        }
-
-        binding.switchObjectDetection.setOnCheckedChangeListener { _, isChecked ->
-            AppPreferences.setObjectDetectionEnabled(this, isChecked)
-            restartServer()
-        }
-
-        binding.sliderMotionSensitivity.addOnChangeListener { _, value, fromUser ->
-            if (fromUser) AppPreferences.setMotionSensitivity(this, value.toInt())
-        }
-
-        binding.sliderDetectionCooldown.addOnChangeListener { _, value, fromUser ->
-            if (fromUser) AppPreferences.setDetectionCooldownSeconds(this, value.toInt())
-        }
+        setupZoomSlider()
 
         binding.switchWebAuth.setOnCheckedChangeListener { _, isChecked ->
             AppPreferences.setWebAuthEnabled(this, isChecked)
@@ -319,15 +301,30 @@ class MainActivity : AppCompatActivity() {
         binding.switchAutoStart.setOnCheckedChangeListener { _, isChecked ->
             AppPreferences.setAutoStartOnLaunch(this, isChecked)
         }
+    }
 
-        binding.toolbar.setOnMenuItemClickListener { item ->
-            if (item.itemId == R.id.action_events) {
-                startActivity(Intent(this, EventsActivity::class.java))
-                true
-            } else {
-                false
-            }
+    /**
+     * Writes every tick to [AppPreferences] (cheap, matches [binding.sliderMotionSensitivity]'s
+     * existing per-tick write), but debounces the actual push to the running service --
+     * otherwise a drag would fire a startService() call dozens of times a second. The
+     * debounce is flushed immediately on release so the final value is never delayed.
+     */
+    private fun setupZoomSlider() {
+        binding.sliderZoomLevel.addOnChangeListener { _, value, fromUser ->
+            if (!fromUser) return@addOnChangeListener
+            AppPreferences.setZoomLevel(this, value)
+            zoomDebounceRunnable?.let { zoomDebounceHandler.removeCallbacks(it) }
+            val runnable = Runnable { sendSettingToService("zoom_level", value.toString()) }
+            zoomDebounceRunnable = runnable
+            zoomDebounceHandler.postDelayed(runnable, 120)
         }
+        binding.sliderZoomLevel.addOnSliderTouchListener(object : Slider.OnSliderTouchListener {
+            override fun onStartTrackingTouch(slider: Slider) {}
+            override fun onStopTrackingTouch(slider: Slider) {
+                zoomDebounceRunnable?.let { zoomDebounceHandler.removeCallbacks(it) }
+                sendSettingToService("zoom_level", slider.value.toString())
+            }
+        })
     }
 
     /**
@@ -395,9 +392,6 @@ class MainActivity : AppCompatActivity() {
             putExtra("timestamp_size", binding.spinnerOverlaySize.text.toString())
             putExtra("flashlight_enabled", binding.switchFlashlight.isChecked)
             putExtra("night_mode_enabled", binding.switchNightMode.isChecked)
-            putExtra("detection_enabled", binding.switchDetectionEnabled.isChecked)
-            putExtra("motion_detection_enabled", binding.switchMotionDetection.isChecked)
-            putExtra("object_detection_enabled", binding.switchObjectDetection.isChecked)
         }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {

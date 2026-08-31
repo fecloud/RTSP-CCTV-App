@@ -60,9 +60,6 @@ class BootReceiver : BroadcastReceiver() {
             putExtra("timestamp_size", AppPreferences.getTimestampSize(context))
             putExtra("flashlight_enabled", AppPreferences.getFlashlightEnabled(context))
             putExtra("night_mode_enabled", AppPreferences.getNightModeEnabled(context))
-            putExtra("detection_enabled", AppPreferences.getDetectionEnabled(context))
-            putExtra("motion_detection_enabled", AppPreferences.getMotionDetectionEnabled(context))
-            putExtra("object_detection_enabled", AppPreferences.getObjectDetectionEnabled(context))
             putExtra("audio_enabled", AppPreferences.getAudioEnabled(context))
         }
 

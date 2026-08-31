@@ -6,9 +6,8 @@
 
 **Turn any spare Android phone into a real security camera.**
 
-Runs an RTSP server and a web dashboard on your device, streams to VLC, OBS, Frigate,
-Home Assistant or any NVR, and records motion events locally — no cloud, no account,
-no subscription.
+Runs an RTSP server and a web dashboard on your device, and streams to VLC, OBS, Frigate,
+Home Assistant or any NVR — no cloud, no account, no subscription.
 
 [![CI](https://github.com/Zektopic/RSTP-CCTV-App/actions/workflows/ci.yml/badge.svg)](https://github.com/Zektopic/RSTP-CCTV-App/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/Zektopic/RSTP-CCTV-App?sort=semver)](https://github.com/Zektopic/RSTP-CCTV-App/releases)
@@ -31,7 +30,6 @@ no subscription.
 - [Security](#security)
 - [HTTP API](#http-api)
 - [Permissions](#permissions)
-- [Object detection setup](#object-detection-setup)
 - [Building from source](#building-from-source)
 - [Troubleshooting](#troubleshooting)
 - [Roadmap](#roadmap)
@@ -64,18 +62,12 @@ NVR can consume, and keeps every frame on your own network.
 
 ### Monitoring
 - **Web dashboard** on port `8080` — live preview, every setting, battery and Wi-Fi status
-- **Motion detection** with adjustable sensitivity, running entirely on-device
-- **Person and animal detection** via MediaPipe Tasks, with a COCO model **bundled**, so
-  it works on a fresh install
-- **Event captions** describing each snapshot in plain language, generated on-device by
-  Gemini Nano *(only on hardware with AICore — silently absent everywhere else)*
-- **Event storage** with snapshots, a 72-hour retention window and a hard event cap
-- **Events browser** in-app, with thumbnails, and a Frigate-style JSON API
 
 ### Overlays and camera control
 - Timestamp and date overlay, positionable in any corner, three text sizes
 - Torch control, plus a **night mode** that switches the torch on automatically using the
   ambient light sensor
+- Digital zoom control via slider, in both the app and the web dashboard
 
 ---
 
@@ -88,34 +80,20 @@ flowchart LR
 
     ENC --> RTSP[RTSP server<br/>:8554]
     SNAP --> WEB[Web server<br/>:8080]
-    SNAP --> DET
-
-    subgraph DET [Detection pipeline]
-        MOT[Motion detector<br/>luma differencing]
-        OBJ[MediaPipe object detector<br/>person / animal]
-    end
-
-    DET --> STORE[(Event store<br/>JSON + snapshots)]
-    STORE --> WEB
 
     RTSP --> NVR[VLC / OBS / Frigate / NVR]
     WEB --> BROWSER[Browser dashboard]
 ```
 
 Everything runs inside one foreground service. The RTSP stream comes straight off the
-hardware encoder; the dashboard, the detection pipeline and the event snapshots all share
-a single JPEG capture loop, which idles automatically when nothing is watching and
-detection is off.
+hardware encoder; the dashboard shares a single JPEG capture loop, which idles
+automatically when nobody is watching.
 
 | Component | File |
 |---|---|
 | Foreground service, camera, stream lifecycle | `CctvServerService.kt` |
-| HTTP server, dashboard, events API | `WebServer.kt` |
+| HTTP server and dashboard | `WebServer.kt` |
 | Authentication, CSRF and HTML escaping | `WebAuth.kt` |
-| Motion detection | `MotionDetector.kt` |
-| Object detection | `LiteRtObjectDetector.kt` |
-| Event captions (Gemini Nano) | `EventCaptioner.kt` |
-| Event persistence and retention | `EventStore.kt` |
 | Settings | `AppPreferences.kt` |
 
 ---
@@ -224,10 +202,6 @@ cross-origin `Origin` header are rejected with `403`.
 | `GET /` | The dashboard |
 | `GET /shot.jpg` | Current JPEG snapshot |
 | `GET /status` | JSON status: streaming state, codec, resolution, every setting, battery, Wi-Fi |
-| `GET /events?since=<epoch_ms>&limit=<n>` | Stored events, newest first. `limit` defaults to 100, capped at 500 |
-| `GET /events/<id>` | A single event |
-| `GET /events/<id>/snapshot.jpg` | That event's snapshot |
-| `GET /events/<id>/clip.mp4` | Reserved — clip recording is not implemented yet |
 
 ### Write
 
@@ -239,7 +213,6 @@ cross-origin `Origin` header are rejected with `403`.
 | `POST /action/set-resolution` | `w=<int>&h=<int>` (`0x0` = camera maximum) |
 | `POST /action/set-setting` | `key=<key>&value=<value>` |
 | `POST /action/set-auth` | `enabled=<bool>&username=<s>&password=<s>` |
-| `POST /action/create-test-event` | — |
 
 <details>
 <summary><b>Keys accepted by <code>/action/set-setting</code></b></summary>
@@ -252,39 +225,11 @@ cross-origin `Origin` header are rejected with `403`.
 | `timestamp_size` | `Small` \| `Medium` \| `Large` | Overlay text size |
 | `flashlight_enabled` | bool | Torch |
 | `night_mode_enabled` | bool | Automatic torch by ambient light |
+| `zoom_level` | float 1.0–8.0 | Camera digital zoom factor |
 | `force_software` | bool | Prefer the software encoder |
 | `show_preview` | bool | On-device preview overlay |
 | `audio_enabled` | bool | Include microphone audio in the stream |
 | `web_auth_enabled` | bool | Require authentication on port 8080 |
-| `detection_enabled` | bool | Detection master switch |
-| `motion_detection_enabled` | bool | Motion detection |
-| `object_detection_enabled` | bool | Person/animal detection |
-| `motion_sensitivity` | int 1–10 | Higher triggers on smaller changes |
-| `detection_cooldown_seconds` | int 1–600 | Minimum gap between events of one type |
-
-</details>
-
-<details>
-<summary><b>Example event response</b></summary>
-
-```json
-{
-  "events": [
-    {
-      "id": "2f1c8e40-9a3b-4c21-b0d5-7e6f5a4c3b21",
-      "type": "person",
-      "score": 0.87,
-      "start_time": 1755368400000,
-      "end_time": 1755368400000,
-      "snapshot": "2f1c8e40-9a3b-4c21-b0d5-7e6f5a4c3b21_snapshot.jpg",
-      "has_snapshot": true,
-      "has_clip": false,
-      "created_at": 1755368400000
-    }
-  ],
-  "count": 1
-}
-```
 
 </details>
 
@@ -307,25 +252,6 @@ No internet permission is used to send data anywhere. Nothing leaves your networ
 
 ---
 
-## Object detection setup
-
-**Nothing to do — a model is bundled.** Motion detection and person/animal detection both
-work on a fresh install.
-
-The bundled model is [EfficientDet-Lite0](https://ai.google.dev/edge/mediapipe/solutions/vision/object_detector)
-(float32, COCO classes, ~13.8 MB), published by Google for MediaPipe Tasks under
-Apache-2.0. Full attribution is in `app/src/main/assets/DETECT_MODEL_README.txt`.
-
-To use a different model, drop it in as `app/src/main/assets/detect.tflite`, replacing the
-bundled one, then rebuild. It must carry **TFLite Metadata** — MediaPipe reads the labels
-from it, and a bare model will fail to load.
-
-The dashboard's *Model Status* row reports whether the model loaded. Recognised labels
-are `person`, `cat`, `dog`, `bird`, `horse`, `sheep` and `cow`; the detection threshold is
-`0.45`.
-
----
-
 ## Building from source
 
 **Requirements:** JDK 21, Android SDK with API 36, Android Studio (Ladybug or newer) or
@@ -335,7 +261,7 @@ the command line.
 git clone https://github.com/Zektopic/RSTP-CCTV-App.git
 cd RSTP-CCTV-App
 
-./gradlew testDebugUnitTest    # 62 unit tests
+./gradlew testDebugUnitTest    # 32 unit tests
 ./gradlew lintDebug
 ./gradlew assembleDebug        # app/build/outputs/apk/debug/
 ```
@@ -420,25 +346,13 @@ app detects this and posts a *tap to resume* notification instead of crashing. S
 block autostart outright regardless of the setting.
 </details>
 
-<details>
-<summary><b>Person detection stays unavailable</b></summary>
-
-`detect.tflite` is missing or lacks TFLite Metadata — see
-[object detection setup](#object-detection-setup). Motion
-detection is unaffected.
-</details>
-
 ---
 
 ## Roadmap
 
-- [ ] Clip recording (`/events/<id>/clip.mp4` is reserved but not yet implemented)
 - [ ] HTTPS/TLS for the dashboard, so credentials are not sent in plaintext
-- [x] ~~Migrate to a 16 KB page-size-aligned detection build~~ — done: replaced
-      `tensorflow-lite-task-vision` (frozen at 0.4.4, `libtask_vision_jni.so` aligned to
-      4 KB) with MediaPipe Tasks, whose native is aligned to 16 KB
 - [ ] Enable R8 for release builds (needs keep rules for the reflection-heavy
-      MediaPipe and RootEncoder dependencies, plus an on-device verification pass)
+      RootEncoder dependency, plus an on-device verification pass)
 - [ ] ONVIF discovery so NVRs can find the camera automatically
 - [ ] Continuous recording with a rolling buffer
 - [ ] Multi-camera management from one dashboard
@@ -451,7 +365,7 @@ Issues and pull requests are welcome.
 
 - Run `./gradlew testDebugUnitTest lintDebug` before opening a PR — CI runs both.
 - Add tests for logic that can be tested on the JVM. Keeping such logic free of Android
-  imports (as in `WebAuth`, `MotionDetector` and `EventStore`) is deliberate.
+  imports (as in `WebAuth`) is deliberate.
 - Never commit keystores, passwords or `keystore.properties`.
 
 ---
@@ -470,5 +384,3 @@ terms.
 - [RootEncoder](https://github.com/pedroSG94/RootEncoder) and
   [RTSP-Server](https://github.com/pedroSG94/RTSP-Server) by pedroSG94
 - [NanoHTTPD](https://github.com/NanoHttpd/nanohttpd)
-- [MediaPipe Tasks](https://ai.google.dev/edge/mediapipe/solutions/vision/object_detector)
-- [ML Kit GenAI](https://developers.google.com/ml-kit/genai) (Gemini Nano captions)

@@ -9,7 +9,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
-import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.Base64
@@ -26,7 +25,6 @@ import java.util.Base64
 class WebServerAuthInstrumentedTest {
 
     private lateinit var server: WebServer
-    private lateinit var eventStore: EventStore
 
     private var authEnabled = true
     private val username = "admin"
@@ -41,9 +39,6 @@ class WebServerAuthInstrumentedTest {
     @Before
     fun startServer() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
-        val root = File(context.cacheDir, "webserver-auth-test-${System.nanoTime()}")
-        root.mkdirs()
-        eventStore = EventStore(root)
 
         server = WebServer(
             context = context,
@@ -68,18 +63,11 @@ class WebServerAuthInstrumentedTest {
             getTimestampSize = { "Medium" },
             getFlashlightEnabled = { false },
             getNightModeEnabled = { false },
+            getZoomLevel = { 1.0f },
+            getZoomRange = { 1.0f to 8.0f },
             getForceSoftware = { false },
             getShowPreview = { false },
-            getDetectionEnabled = { false },
-            getMotionDetectionEnabled = { false },
-            getObjectDetectionEnabled = { false },
-            getObjectDetectorReady = { false },
             onAuthUpdate = { _, _, _ -> },
-            listEventsJson = { since, limit -> eventStore.listEventsAsJson(since, limit) },
-            getEventJson = { id -> eventStore.getEventAsJson(id) },
-            getEventSnapshotFile = { id -> eventStore.getEventSnapshotFile(id) },
-            getEventClipFile = { id -> eventStore.getEventClipFile(id) },
-            onCreateTestEvent = { eventStore.createTestEvent(null).toJsonObject().toString() },
             getBatteryLevel = { 50 },
             getWifiStrength = { 80 },
             getWebAuthEnabled = { authEnabled },
@@ -123,11 +111,6 @@ class WebServerAuthInstrumentedTest {
     fun snapshotRequiresCredentials() {
         // The live camera frame is the most sensitive thing this server exposes.
         assertEquals(401, request("/shot.jpg").responseCode)
-    }
-
-    @Test
-    fun eventsRequireCredentials() {
-        assertEquals(401, request("/events").responseCode)
     }
 
     @Test

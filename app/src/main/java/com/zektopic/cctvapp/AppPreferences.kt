@@ -138,56 +138,22 @@ object AppPreferences {
         prefs(context).edit().putBoolean(KEY_NIGHT_MODE_ENABLED, enabled).apply()
     }
 
-    // --- Detection ---
-    private const val KEY_DETECTION_ENABLED = "detection_enabled"
-    private const val KEY_MOTION_DETECTION_ENABLED = "motion_detection_enabled"
-    private const val KEY_OBJECT_DETECTION_ENABLED = "object_detection_enabled"
+    // --- Zoom ---
+    private const val KEY_ZOOM_LEVEL = "zoom_level"
 
-    fun getDetectionEnabled(context: Context): Boolean =
-        prefs(context).getBoolean(KEY_DETECTION_ENABLED, false)
+    // Generic, hardware-agnostic bounds for the stored zoom level. The real Camera2 zoom
+    // range varies per device and is only known once the camera session is open
+    // (Camera2Base#getZoomRange()) -- CctvServerService clamps again against that real
+    // range before calling setZoom().
+    const val ZOOM_MIN = 1.0f
+    const val ZOOM_MAX = 8.0f
+    const val DEFAULT_ZOOM_LEVEL = 1.0f
 
-    fun setDetectionEnabled(context: Context, enabled: Boolean) {
-        prefs(context).edit().putBoolean(KEY_DETECTION_ENABLED, enabled).apply()
-    }
+    fun getZoomLevel(context: Context): Float =
+        prefs(context).getFloat(KEY_ZOOM_LEVEL, DEFAULT_ZOOM_LEVEL).coerceIn(ZOOM_MIN, ZOOM_MAX)
 
-    fun getMotionDetectionEnabled(context: Context): Boolean =
-        prefs(context).getBoolean(KEY_MOTION_DETECTION_ENABLED, true)
-
-    fun setMotionDetectionEnabled(context: Context, enabled: Boolean) {
-        prefs(context).edit().putBoolean(KEY_MOTION_DETECTION_ENABLED, enabled).apply()
-    }
-
-    fun getObjectDetectionEnabled(context: Context): Boolean =
-        prefs(context).getBoolean(KEY_OBJECT_DETECTION_ENABLED, true)
-
-    fun setObjectDetectionEnabled(context: Context, enabled: Boolean) {
-        prefs(context).edit().putBoolean(KEY_OBJECT_DETECTION_ENABLED, enabled).apply()
-    }
-
-    // --- Detection tuning ---
-    private const val KEY_MOTION_SENSITIVITY = "motion_sensitivity"
-    private const val KEY_DETECTION_COOLDOWN_SECONDS = "detection_cooldown_seconds"
-
-    const val DEFAULT_MOTION_SENSITIVITY = 5
-    const val DEFAULT_DETECTION_COOLDOWN_SECONDS = 10
-
-    /** 1 (least sensitive) .. 10 (most sensitive). */
-    fun getMotionSensitivity(context: Context): Int =
-        prefs(context).getInt(KEY_MOTION_SENSITIVITY, DEFAULT_MOTION_SENSITIVITY).coerceIn(1, 10)
-
-    fun setMotionSensitivity(context: Context, sensitivity: Int) {
-        prefs(context).edit().putInt(KEY_MOTION_SENSITIVITY, sensitivity.coerceIn(1, 10)).apply()
-    }
-
-    /** Minimum gap between two events of the same type, in seconds. */
-    fun getDetectionCooldownSeconds(context: Context): Int =
-        prefs(context).getInt(KEY_DETECTION_COOLDOWN_SECONDS, DEFAULT_DETECTION_COOLDOWN_SECONDS)
-            .coerceIn(1, 600)
-
-    fun setDetectionCooldownSeconds(context: Context, seconds: Int) {
-        prefs(context).edit()
-            .putInt(KEY_DETECTION_COOLDOWN_SECONDS, seconds.coerceIn(1, 600))
-            .apply()
+    fun setZoomLevel(context: Context, zoom: Float) {
+        prefs(context).edit().putFloat(KEY_ZOOM_LEVEL, zoom.coerceIn(ZOOM_MIN, ZOOM_MAX)).apply()
     }
 
     // --- Web dashboard security ---
