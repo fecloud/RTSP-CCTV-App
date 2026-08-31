@@ -64,6 +64,19 @@ android {
     }
 
     buildTypes {
+        debug {
+            // Sign debug builds with the same release key when it's available locally,
+            // so a debug APK can be installed over (or alongside upgrades from) a
+            // release APK without Android's INSTALL_FAILED_UPDATE_INCOMPATIBLE --
+            // otherwise debug and release fall back to two different signers (the
+            // auto-generated ~/.android/debug.keystore vs. the real release key) and
+            // switching between them on the same device means uninstalling first.
+            // Falls through to AGP's default debug signing when no keystore.properties
+            // exists (e.g. in CI, or for a contributor without release credentials).
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("release")
+            }
+        }
         release {
             // Kept off deliberately: RootEncoder resolves classes reflectively, and a
             // mis-shrunk release only fails at runtime. Enabling R8 needs a full
