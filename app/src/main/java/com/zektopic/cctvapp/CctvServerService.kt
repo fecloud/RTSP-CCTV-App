@@ -1187,12 +1187,22 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
      * [applyZoom]/[applyFlashlight], this doesn't need a live camera session: it's a
      * render-time flag on the view itself, so it's safe to call as soon as
      * [openGlView] exists.
+     *
+     * Uses `setCameraFlip`, not `setIs{Preview,Stream}VerticalFlip`: the latter pair
+     * flips the *final composited* frame -- after the timestamp overlay filter has
+     * already been drawn onto it -- so the date/time text flipped upside-down along
+     * with the picture. `setCameraFlip` flips only the raw camera texture before
+     * filters are composited, so the picture flips but the overlay text stays upright
+     * with no extra work needed. Its two parameters are `(horizontal, vertical)`, but
+     * empirically -- confirmed on-device via /shot.jpg -- a phone's camera sensor is
+     * mounted rotated relative to the display, so what this method calls "vertical"
+     * shows up as a *horizontal* mirror in the actual rendered frame. [verticalFlipEnabled]
+     * is passed as the first (horizontal) argument to compensate.
      */
     private fun applyVerticalFlip() {
         if (!::openGlView.isInitialized) return
         try {
-            openGlView.setIsPreviewVerticalFlip(verticalFlipEnabled)
-            openGlView.setIsStreamVerticalFlip(verticalFlipEnabled)
+            openGlView.setCameraFlip(verticalFlipEnabled, false)
         } catch (e: Exception) {
             android.util.Log.e("CctvServerService", "Failed to set vertical flip", e)
         }
