@@ -1194,15 +1194,30 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
      * with the picture. `setCameraFlip` flips only the raw camera texture before
      * filters are composited, so the picture flips but the overlay text stays upright
      * with no extra work needed. Its two parameters are `(horizontal, vertical)`, but
-     * empirically -- confirmed on-device via /shot.jpg -- a phone's camera sensor is
-     * mounted rotated relative to the display, so what this method calls "vertical"
-     * shows up as a *horizontal* mirror in the actual rendered frame. [verticalFlipEnabled]
-     * is passed as the first (horizontal) argument to compensate.
+     * on the Camera2 path -- confirmed on-device via /shot.jpg -- a phone's camera
+     * sensor is mounted rotated relative to the display, and RootEncoder's
+     * `Camera2Base` applies that as a real 90/270 rotation in the GL matrix *after*
+     * the flip (scale) matrix, so what this method calls "vertical" shows up as a
+     * *horizontal* mirror in the rendered frame; [verticalFlipEnabled] is passed as
+     * the first (horizontal) argument there to compensate.
+     *
+     * [useCamera1Fallback] does NOT get that swap: RootEncoder's `Camera1Base` always
+     * calls `GlInterface.setRotation(0)` (decompiled from RootEncoder 2.7.2's
+     * `library-2.7.2.aar` to confirm) -- Camera1 instead bakes the sensor rotation
+     * into the raw preview buffer itself via `Camera.setDisplayOrientation()` before
+     * GL ever sees it, so there's no axis-swapping rotation for the flip to land
+     * before. Applying the Camera2 swap here mirrored left-right instead of flipping
+     * top-to-bottom on a Camera1-fallback device (confirmed on a Camera1-fallback
+     * device: Xiaomi Mi 4).
      */
     private fun applyVerticalFlip() {
         if (!::openGlView.isInitialized) return
         try {
-            openGlView.setCameraFlip(verticalFlipEnabled, false)
+            if (useCamera1Fallback) {
+                openGlView.setCameraFlip(false, verticalFlipEnabled)
+            } else {
+                openGlView.setCameraFlip(verticalFlipEnabled, false)
+            }
         } catch (e: Exception) {
             android.util.Log.e("CctvServerService", "Failed to set vertical flip", e)
         }
