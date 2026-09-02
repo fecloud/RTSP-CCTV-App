@@ -1,5 +1,7 @@
 package com.zektopic.cctvapp
 
+import android.os.Build
+import androidx.annotation.RequiresApi
 import com.pedro.common.VideoCodec
 import com.pedro.encoder.utils.CodecUtil
 import com.pedro.library.base.recording.RecordController
@@ -52,6 +54,7 @@ interface CameraStreamer {
      * both: same `startRecord`/`stopRecord`/`isRecording` signatures on each.
      */
     fun startRecord(path: String, listener: RecordController.Listener)
+    @RequiresApi(Build.VERSION_CODES.O) // MediaMuxer(FileDescriptor, int) needs API 26
     fun startRecord(fd: FileDescriptor, listener: RecordController.Listener)
     fun stopRecord()
     fun isRecording(): Boolean
@@ -89,6 +92,7 @@ class Camera2Streamer(private val camera: RtspServerCamera2) : CameraStreamer {
         camera.zoom = value
     }
     override fun startRecord(path: String, listener: RecordController.Listener) = camera.startRecord(path, listener)
+    @RequiresApi(Build.VERSION_CODES.O)
     override fun startRecord(fd: FileDescriptor, listener: RecordController.Listener) = camera.startRecord(fd, listener)
     override fun stopRecord() = camera.stopRecord()
     override fun isRecording() = camera.isRecording()
@@ -133,6 +137,7 @@ class Camera1Streamer(private val camera: RtspServerCamera1) : CameraStreamer {
         camera.setZoom(mapZoomLevelToCamera1Index(value, AppPreferences.ZOOM_MIN, AppPreferences.ZOOM_MAX, camera.maxZoom))
     }
     override fun startRecord(path: String, listener: RecordController.Listener) = camera.startRecord(path, listener)
+    @RequiresApi(Build.VERSION_CODES.O)
     override fun startRecord(fd: FileDescriptor, listener: RecordController.Listener) = camera.startRecord(fd, listener)
     override fun stopRecord() = camera.stopRecord()
     override fun isRecording() = camera.isRecording()
