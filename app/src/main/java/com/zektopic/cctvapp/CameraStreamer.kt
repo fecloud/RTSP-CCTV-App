@@ -2,10 +2,12 @@ package com.zektopic.cctvapp
 
 import com.pedro.common.VideoCodec
 import com.pedro.encoder.utils.CodecUtil
+import com.pedro.library.base.recording.RecordController
 import com.pedro.library.util.streamclient.StreamBaseClient
 import com.pedro.library.view.GlInterface
 import com.pedro.rtspserver.RtspServerCamera1
 import com.pedro.rtspserver.RtspServerCamera2
+import java.io.FileDescriptor
 import kotlin.math.roundToInt
 
 /**
@@ -44,6 +46,15 @@ interface CameraStreamer {
     fun getZoomRange(): Pair<Float, Float>
     /** [value] is the app's semantic zoom factor (see [getZoomRange]), not a raw device value. */
     fun setZoom(value: Float)
+    /**
+     * `Camera1Base`/`Camera2Base` share no common supertype (see class doc) but expose
+     * identical recording methods, so these just forward -- confirmed by decompiling
+     * both: same `startRecord`/`stopRecord`/`isRecording` signatures on each.
+     */
+    fun startRecord(path: String, listener: RecordController.Listener)
+    fun startRecord(fd: FileDescriptor, listener: RecordController.Listener)
+    fun stopRecord()
+    fun isRecording(): Boolean
 }
 
 class Camera2Streamer(private val camera: RtspServerCamera2) : CameraStreamer {
@@ -77,6 +88,10 @@ class Camera2Streamer(private val camera: RtspServerCamera2) : CameraStreamer {
     override fun setZoom(value: Float) {
         camera.zoom = value
     }
+    override fun startRecord(path: String, listener: RecordController.Listener) = camera.startRecord(path, listener)
+    override fun startRecord(fd: FileDescriptor, listener: RecordController.Listener) = camera.startRecord(fd, listener)
+    override fun stopRecord() = camera.stopRecord()
+    override fun isRecording() = camera.isRecording()
 }
 
 /**
@@ -117,6 +132,10 @@ class Camera1Streamer(private val camera: RtspServerCamera1) : CameraStreamer {
     override fun setZoom(value: Float) {
         camera.setZoom(mapZoomLevelToCamera1Index(value, AppPreferences.ZOOM_MIN, AppPreferences.ZOOM_MAX, camera.maxZoom))
     }
+    override fun startRecord(path: String, listener: RecordController.Listener) = camera.startRecord(path, listener)
+    override fun startRecord(fd: FileDescriptor, listener: RecordController.Listener) = camera.startRecord(fd, listener)
+    override fun stopRecord() = camera.stopRecord()
+    override fun isRecording() = camera.isRecording()
 
     companion object {
         /**
