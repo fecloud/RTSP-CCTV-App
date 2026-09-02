@@ -204,6 +204,8 @@ cross-origin `Origin` header are rejected with `403`.
 | `GET /` | The dashboard |
 | `GET /shot.jpg` | Current JPEG snapshot |
 | `GET /status` | JSON status: streaming state, codec, resolution, every setting, battery, Wi-Fi |
+| `GET /recordings` | HTML page listing saved recordings, newest first |
+| `GET /recording.mp4?id=<id>[&download=1]` | Streams a recording inline, or forces download with `download=1` |
 
 ### Write
 
@@ -233,6 +235,8 @@ cross-origin `Origin` header are rejected with `403`.
 | `show_preview` | bool | On-device preview overlay |
 | `audio_enabled` | bool | Include microphone audio in the stream |
 | `web_auth_enabled` | bool | Require authentication on port 8081 |
+| `record_to_gallery_enabled` | bool | Record rotating segments to `Movies/CCTVApp` in the gallery |
+| `record_segment_minutes` | int 1–60 | Length of each recorded segment |
 
 </details>
 
@@ -251,6 +255,7 @@ cross-origin `Origin` header are rejected with `403`.
 | `POST_NOTIFICATIONS` | Recommended | Android 13+. Without it the service notification is suppressed and you lose the visible indicator that the camera is live. |
 | `RECEIVE_BOOT_COMPLETED` | Only with start-on-boot | Restarting after a reboot. |
 | `ACCESS_WIFI_STATE` | Optional | Wi-Fi signal readout on the dashboard. |
+| `WRITE_EXTERNAL_STORAGE` | Only on Android 9 and below, with gallery recording on | Writing video segments to the gallery pre-scoped-storage. Not needed on Android 10+, where the app writes its own `MediaStore` rows without any permission. |
 
 No internet permission is used to send data anywhere. Nothing leaves your network.
 

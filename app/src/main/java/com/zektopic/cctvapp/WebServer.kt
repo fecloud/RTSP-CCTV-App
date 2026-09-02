@@ -4,6 +4,12 @@ import android.content.Context
 import android.content.Intent
 import fi.iki.elonen.NanoHTTPD
 import java.io.ByteArrayInputStream
+import java.io.InputStream
+import java.text.SimpleDateFormat
+import java.util.Locale
+
+/** One saved recording under `Movies/CCTVApp/`, as listed on the `/recordings` page. */
+data class RecordingEntry(val id: Long, val displayName: String, val sizeBytes: Long, val dateAddedMillis: Long)
 
 class WebServer(
     private val context: Context,
@@ -39,6 +45,11 @@ class WebServer(
     private val getBatteryLevel: () -> Int,
     private val getWifiStrength: () -> Int,
     private val getWebAuthEnabled: () -> Boolean,
+    private val getRecordToGalleryEnabled: () -> Boolean,
+    private val getRecordSegmentMinutes: () -> Int,
+    private val getIsRecordingToGallery: () -> Boolean,
+    private val getRecordings: () -> List<RecordingEntry>,
+    private val openRecordingStream: (Long) -> InputStream?,
     /**
      * Port to bind. Defaults to [PORT]; tests pass [EPHEMERAL_PORT] so they get a free
      * port from the OS instead of colliding with a [CctvServerService] already on [PORT].
@@ -186,15 +197,57 @@ class WebServer(
                 "showPreview":${getShowPreview()},
                 "batteryLevel":${getBatteryLevel()},
                 "wifiStrength":${getWifiStrength()},
-                "webAuthEnabled":${getWebAuthEnabled()}
+                "webAuthEnabled":${getWebAuthEnabled()},
+                "recordToGalleryEnabled":${getRecordToGalleryEnabled()},
+                "recordSegmentMinutes":${getRecordSegmentMinutes()},
+                "isRecordingToGallery":${getIsRecordingToGallery()}
             }""".trimIndent()
             return newFixedLengthResponse(Response.Status.OK, "application/json", json)
         }
 
         if (uri == "/" || uri == "/greet.html") {
             return newFixedLengthResponse(buildDashboardHtml())
-        } 
-        
+        }
+
+        if (uri == "/recordings") {
+            return newFixedLengthResponse(buildRecordingsHtml(getRecordings()))
+        }
+
+        // Streams/downloads one recording. Honors a single-range `Range` header (what
+        // browsers send when the user drags a <video>'s seek bar) so playback can jump
+        // around instead of only playing straight through from the start.
+        if (uri == "/recording.mp4") {
+            val id = session.parameters["id"]?.get(0)?.toLongOrNull()
+                ?: return newFixedLengthResponse(Response.Status.BAD_REQUEST, MIME_PLAINTEXT, "Missing id")
+            val entry = getRecordings().find { it.id == id }
+                ?: return newFixedLengthResponse(Response.Status.NOT_FOUND, MIME_PLAINTEXT, "Recording not found")
+            val stream = openRecordingStream(id)
+                ?: return newFixedLengthResponse(Response.Status.NOT_FOUND, MIME_PLAINTEXT, "Recording not found")
+            val download = session.parameters["download"]?.get(0) == "1"
+            val disposition = if (download) "attachment" else "inline"
+            val totalLength = entry.sizeBytes
+
+            val rangeHeader = session.headers?.get("range")
+            val range = if (rangeHeader != null && totalLength > 0) parseRange(rangeHeader, totalLength) else null
+            val response = if (rangeHeader != null && range == null) {
+                stream.close()
+                newFixedLengthResponse(Response.Status.RANGE_NOT_SATISFIABLE, MIME_PLAINTEXT, "Invalid range").also {
+                    it.addHeader("Content-Range", "bytes */$totalLength")
+                }
+            } else if (range != null) {
+                val (start, end) = range
+                skipFully(stream, start)
+                newFixedLengthResponse(Response.Status.PARTIAL_CONTENT, "video/mp4", stream, end - start + 1).also {
+                    it.addHeader("Content-Range", "bytes $start-$end/$totalLength")
+                }
+            } else {
+                newFixedLengthResponse(Response.Status.OK, "video/mp4", stream, totalLength)
+            }
+            response.addHeader("Accept-Ranges", "bytes")
+            response.addHeader("Content-Disposition", "$disposition; filename=\"${entry.displayName}\"")
+            return response
+        }
+
         // Legacy redirect
         if (uri.startsWith("/server/")) {
              if (uri.endsWith("on")) {
@@ -211,6 +264,45 @@ class WebServer(
     }
 
     private fun escapeJson(s: String): String = s.replace("\\", "\\\\").replace("\"", "\\\"")
+
+    /**
+     * Parses a single-range `Range: bytes=...` header value (`start-end`, `start-`, or
+     * `-suffixLength`) into an inclusive `(start, end)` pair clamped to [totalLength].
+     * Multi-range requests aren't supported -- browsers don't send them for video
+     * seeking -- so only the first range is honored. Returns null for anything
+     * malformed or unsatisfiable.
+     */
+    private fun parseRange(header: String, totalLength: Long): Pair<Long, Long>? {
+        if (!header.startsWith("bytes=")) return null
+        val spec = header.removePrefix("bytes=").substringBefore(",")
+        val parts = spec.split("-", limit = 2)
+        if (parts.size != 2) return null
+        val startPart = parts[0].trim()
+        val endPart = parts[1].trim()
+        val start: Long
+        val end: Long
+        if (startPart.isEmpty()) {
+            val suffixLength = endPart.toLongOrNull() ?: return null
+            if (suffixLength <= 0) return null
+            start = (totalLength - suffixLength).coerceAtLeast(0)
+            end = totalLength - 1
+        } else {
+            start = startPart.toLongOrNull() ?: return null
+            end = if (endPart.isEmpty()) totalLength - 1 else (endPart.toLongOrNull() ?: return null)
+        }
+        if (start < 0 || end < start || start >= totalLength) return null
+        return start to end.coerceAtMost(totalLength - 1)
+    }
+
+    /** [InputStream.skip] isn't guaranteed to skip the full amount in one call. */
+    private fun skipFully(stream: InputStream, byteCount: Long) {
+        var remaining = byteCount
+        while (remaining > 0) {
+            val skipped = stream.skip(remaining)
+            if (skipped <= 0) break
+            remaining -= skipped
+        }
+    }
 
     private fun buildRtspUrl(): String {
         val authOn = getAuthEnabled()
@@ -622,6 +714,7 @@ class WebServer(
             <div class="preview-wrapper">
                 <img id="cam-preview" src="/shot.jpg" alt="Live Preview" />
                 <div class="preview-overlay">
+                    <span class="chip" id="chipRec" style="display:none;color:var(--danger);">● REC</span>
                     <span class="chip" id="chipCodec">—</span>
                     <span class="chip" id="chipRes">—</span>
                 </div>
@@ -759,6 +852,29 @@ class WebServer(
                 </div>
                 <input type="range" class="range-slider" id="zoomSlider" min="1" max="8" step="0.1" value="1"
                        oninput="onZoomInput(this.value)" onchange="onZoomChange(this.value)">
+            </div>
+        </div>
+
+        <!-- Recording -->
+        <div class="settings-card">
+            <h3>Recording</h3>
+            <div class="setting-row">
+                <div>
+                    <span class="setting-label">Record to Gallery</span>
+                    <div class="setting-sublabel" id="recordingStatusText">Saves rotating segments to Movies/CCTVApp</div>
+                </div>
+                <label class="toggle">
+                    <input type="checkbox" id="toggleRecordToGallery" onchange="setSetting('record_to_gallery_enabled', this.checked)">
+                    <span class="toggle-track"></span>
+                </label>
+            </div>
+            <div class="setting-row">
+                <span class="setting-label">Segment Length (min)</span>
+                <input type="number" class="text-input" id="recordSegmentMinutes" min="1" max="60" style="width:80px;"
+                       onchange="setSetting('record_segment_minutes', this.value)">
+            </div>
+            <div class="setting-row">
+                <a href="/recordings" style="color:var(--accent); text-decoration:none; font-weight:600; font-size:14px;">Saved Recordings &#8594;</a>
             </div>
         </div>
 
@@ -927,6 +1043,13 @@ class WebServer(
                         bitrateValueText.textContent = data.bitrateKbps + ' kbps';
                     }
 
+                    // Sync recording
+                    document.getElementById('toggleRecordToGallery').checked = data.recordToGalleryEnabled;
+                    if (document.activeElement.id !== 'recordSegmentMinutes') {
+                        document.getElementById('recordSegmentMinutes').value = data.recordSegmentMinutes;
+                    }
+                    document.getElementById('chipRec').style.display = data.isRecordingToGallery ? 'inline-block' : 'none';
+
                     // Sync auth
                     document.getElementById('toggleAuth').checked = data.authEnabled;
                     document.getElementById('toggleWebAuth').checked = data.webAuthEnabled;
@@ -1003,6 +1126,117 @@ class WebServer(
             toastTimer = setTimeout(() => toast.classList.remove('show'), 2500);
         }
     </script>
+</body>
+</html>
+        """
+    }
+
+    private fun formatBytes(bytes: Long): String {
+        if (bytes < 1024) return "$bytes B"
+        val units = arrayOf("KB", "MB", "GB")
+        var value = bytes / 1024.0
+        var unitIndex = 0
+        while (value >= 1024.0 && unitIndex < units.lastIndex) {
+            value /= 1024.0
+            unitIndex++
+        }
+        return "%.1f %s".format(Locale.US, value, units[unitIndex])
+    }
+
+    private fun buildRecordingsHtml(recordings: List<RecordingEntry>): String {
+        val dateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
+        val rows = if (recordings.isEmpty()) {
+            """<div class="empty-state">No recordings saved yet.</div>"""
+        } else {
+            recordings.joinToString("\n") { entry ->
+                val safeName = WebAuth.escapeHtml(entry.displayName)
+                val safeDate = WebAuth.escapeHtml(dateFormat.format(java.util.Date(entry.dateAddedMillis)))
+                """
+                <div class="setting-row">
+                    <div>
+                        <span class="setting-label">$safeName</span>
+                        <div class="setting-sublabel">${formatBytes(entry.sizeBytes)} &middot; $safeDate</div>
+                    </div>
+                    <div style="display:flex; gap:12px;">
+                        <a href="/recording.mp4?id=${entry.id}" target="_blank"
+                           style="color:var(--accent); text-decoration:none; font-weight:600;">Play</a>
+                        <a href="/recording.mp4?id=${entry.id}&download=1"
+                           style="color:var(--text-secondary); text-decoration:none; font-weight:600;">Download</a>
+                    </div>
+                </div>
+                """.trimIndent()
+            }
+        }
+        return """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>Recordings — ${WebAuth.escapeHtml(ipAddress)}</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        :root {
+            --bg: #0f1117;
+            --surface: #1a1d27;
+            --border: rgba(255,255,255,0.06);
+            --text: #e8eaed;
+            --text-secondary: #9aa0b0;
+            --accent: #00b894;
+            --radius: 16px;
+        }
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 24px 16px;
+            -webkit-font-smoothing: antialiased;
+        }
+        .container { width: 100%; max-width: 520px; }
+        .header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; }
+        .header h1 {
+            font-size: 22px;
+            font-weight: 700;
+            letter-spacing: -0.5px;
+            background: linear-gradient(135deg, #00b894, #00cec9);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .header a { color: var(--text-secondary); text-decoration: none; font-weight: 600; font-size: 14px; }
+        .settings-card {
+            background: var(--surface);
+            border-radius: var(--radius);
+            border: 1px solid var(--border);
+            padding: 8px 20px;
+        }
+        .setting-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 16px 0;
+            gap: 16px;
+        }
+        .setting-row + .setting-row { border-top: 1px solid var(--border); }
+        .setting-label { font-size: 15px; font-weight: 500; }
+        .setting-sublabel { font-size: 12px; color: var(--text-secondary); margin-top: 2px; }
+        .empty-state { padding: 32px 0; text-align: center; color: var(--text-secondary); }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Recordings</h1>
+            <a href="/">&#8592; Dashboard</a>
+        </div>
+        <div class="settings-card">
+            $rows
+        </div>
+    </div>
 </body>
 </html>
         """
