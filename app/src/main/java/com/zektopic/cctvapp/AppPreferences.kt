@@ -253,4 +253,54 @@ object AppPreferences {
     fun setAutoStartOnLaunch(context: Context, enabled: Boolean) {
         prefs(context).edit().putBoolean(KEY_AUTO_START_ON_LAUNCH, enabled).apply()
     }
+
+    // --- Record to Gallery ---
+    private const val KEY_RECORD_TO_GALLERY_ENABLED = "record_to_gallery_enabled"
+    private const val KEY_RECORD_SEGMENT_MINUTES = "record_segment_minutes"
+    private const val KEY_RECORD_STORAGE_THRESHOLD_PERCENT = "record_storage_threshold_percent"
+
+    const val RECORD_SEGMENT_MINUTES_MIN = 1
+    const val RECORD_SEGMENT_MINUTES_MAX = 60
+    const val DEFAULT_RECORD_SEGMENT_MINUTES = 5
+
+    /**
+     * Loop-recording retention: once local storage usage crosses this percentage,
+     * starting a new segment deletes the oldest finished ones -- one at a time, until
+     * usage drops back under it -- otherwise a server left running would fill the
+     * device's storage with 5-minute clips indefinitely.
+     */
+    const val RECORD_STORAGE_THRESHOLD_PERCENT_MIN = 50
+    const val RECORD_STORAGE_THRESHOLD_PERCENT_MAX = 95
+    const val DEFAULT_RECORD_STORAGE_THRESHOLD_PERCENT = 90
+
+    /** Off by default: recording to the gallery uses storage the user should opt into. */
+    fun getRecordToGalleryEnabled(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_RECORD_TO_GALLERY_ENABLED, false)
+
+    fun setRecordToGalleryEnabled(context: Context, enabled: Boolean) {
+        prefs(context).edit().putBoolean(KEY_RECORD_TO_GALLERY_ENABLED, enabled).apply()
+    }
+
+    fun getRecordSegmentMinutes(context: Context): Int =
+        prefs(context).getInt(KEY_RECORD_SEGMENT_MINUTES, DEFAULT_RECORD_SEGMENT_MINUTES)
+            .coerceIn(RECORD_SEGMENT_MINUTES_MIN, RECORD_SEGMENT_MINUTES_MAX)
+
+    fun setRecordSegmentMinutes(context: Context, minutes: Int) {
+        prefs(context).edit()
+            .putInt(KEY_RECORD_SEGMENT_MINUTES, minutes.coerceIn(RECORD_SEGMENT_MINUTES_MIN, RECORD_SEGMENT_MINUTES_MAX))
+            .apply()
+    }
+
+    fun getRecordStorageThresholdPercent(context: Context): Int =
+        prefs(context).getInt(KEY_RECORD_STORAGE_THRESHOLD_PERCENT, DEFAULT_RECORD_STORAGE_THRESHOLD_PERCENT)
+            .coerceIn(RECORD_STORAGE_THRESHOLD_PERCENT_MIN, RECORD_STORAGE_THRESHOLD_PERCENT_MAX)
+
+    fun setRecordStorageThresholdPercent(context: Context, percent: Int) {
+        prefs(context).edit()
+            .putInt(
+                KEY_RECORD_STORAGE_THRESHOLD_PERCENT,
+                percent.coerceIn(RECORD_STORAGE_THRESHOLD_PERCENT_MIN, RECORD_STORAGE_THRESHOLD_PERCENT_MAX)
+            )
+            .apply()
+    }
 }

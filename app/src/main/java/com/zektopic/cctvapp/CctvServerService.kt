@@ -3,6 +3,7 @@ package com.zektopic.cctvapp
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
+import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
@@ -18,13 +19,19 @@ import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
+import android.media.MediaScannerConnection
 import android.net.ConnectivityManager
+import android.net.Uri
 import android.net.wifi.WifiManager
 import android.os.BatteryManager
 import android.os.Build
+import android.os.Environment
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.ParcelFileDescriptor
+import android.os.StatFs
+import android.provider.MediaStore
 import android.view.Gravity
 import android.view.SurfaceHolder
 import android.view.WindowManager
@@ -33,10 +40,13 @@ import com.pedro.common.ConnectChecker
 import com.pedro.common.VideoCodec
 import com.pedro.encoder.input.gl.render.filters.`object`.TextObjectFilterRender
 import com.pedro.encoder.utils.CodecUtil
+import com.pedro.library.base.recording.RecordController
 import com.pedro.library.view.OpenGlView
 import com.pedro.rtspserver.RtspServerCamera1
 import com.pedro.rtspserver.RtspServerCamera2
 import java.io.ByteArrayOutputStream
+import java.io.File
+import java.io.InputStream
 import java.net.Inet4Address
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -57,6 +67,9 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
         private const val IDLE_SNAPSHOT_INTERVAL_MS = 3000L
         /** How long after the last /shot.jpg we keep treating a viewer as present. */
         private const val VIEWER_IDLE_TIMEOUT_MS = 10_000L
+
+        /** Where gallery recording segments are saved, relative to the shared Movies collection. */
+        private const val RECORDING_RELATIVE_PATH = "Movies/CCTVApp/"
 
         /**
          * True when a kernel thermal-zone `type` string looks like it belongs to the
@@ -152,6 +165,11 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
     @Volatile private var isRestartingService = false
     @Volatile private var zoomLevel: Float = AppPreferences.DEFAULT_ZOOM_LEVEL
     @Volatile private var bitrateKbps: Int = AppPreferences.DEFAULT_BITRATE_KBPS
+    @Volatile private var recordToGalleryEnabled = false
+    @Volatile private var recordSegmentMinutes = AppPreferences.DEFAULT_RECORD_SEGMENT_MINUTES
+    @Volatile private var recordStorageThresholdPercent = AppPreferences.DEFAULT_RECORD_STORAGE_THRESHOLD_PERCENT
+    /** Read-only status surfaced in /status -- true only while a segment is actively being written. */
+    @Volatile private var isRecordingToGallery = false
     private var isLanternOn = false
     private val mainHandler = Handler(Looper.getMainLooper())
 
@@ -202,6 +220,32 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
         }
     }
 
+    // --- Record to Gallery ---
+    // Schedules the one-shot "stop the current segment" tick; the *next* segment is only
+    // started from recordListener once RecordController confirms the previous one actually
+    // stopped (see beginNewRecordingSegment/finalizeCurrentSegment).
+    private val recordRotationHandler = Handler(Looper.getMainLooper())
+    private val mediaStoreExecutor = Executors.newSingleThreadExecutor()
+
+    // Main-thread-only bookkeeping for the segment currently being written -- never touched
+    // from mediaStoreExecutor or a NanoHTTPD thread, so unlike the fields above these don't
+    // need to be @Volatile.
+    private var currentRecordingUri: Uri? = null
+    private var currentRecordingPfd: ParcelFileDescriptor? = null
+
+    private val recordListener = object : RecordController.Listener {
+        override fun onStatusChange(status: RecordController.Status) {
+            if (status == RecordController.Status.STOPPED) {
+                onMain { finalizeCurrentSegment(rotateNext = recordToGalleryEnabled) }
+            }
+        }
+
+        override fun onError(e: Exception?) {
+            android.util.Log.e("CctvServerService", "Gallery recording error", e)
+            onMain { finalizeCurrentSegment(rotateNext = recordToGalleryEnabled) }
+        }
+    }
+
     override fun onBind(intent: Intent?): IBinder? {
         return null
     }
@@ -229,6 +273,9 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
         bitrateKbps = AppPreferences.getBitrateKbps(this)
         webAuthEnabled = AppPreferences.getWebAuthEnabled(this)
         audioEnabled = AppPreferences.getAudioEnabled(this)
+        recordToGalleryEnabled = AppPreferences.getRecordToGalleryEnabled(this)
+        recordSegmentMinutes = AppPreferences.getRecordSegmentMinutes(this)
+        recordStorageThresholdPercent = AppPreferences.getRecordStorageThresholdPercent(this)
 
         // Setup light sensor for night mode
         sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
@@ -303,7 +350,7 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
             onStopStream = {
                 onMain {
                     if (::cameraStreamer.isInitialized && cameraStreamer.isStreaming) {
-                        cameraStreamer.stopStream()
+                        stopStreamAndRecording()
                     }
                 }
             },
@@ -374,7 +421,12 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
             },
             getBatteryLevel = { getBatteryLevel() },
             getWifiStrength = { getWifiStrength() },
-            getWebAuthEnabled = { AppPreferences.getWebAuthEnabled(this) }
+            getWebAuthEnabled = { AppPreferences.getWebAuthEnabled(this) },
+            getRecordToGalleryEnabled = { recordToGalleryEnabled },
+            getRecordSegmentMinutes = { recordSegmentMinutes },
+            getIsRecordingToGallery = { isRecordingToGallery },
+            getRecordings = { listRecordings() },
+            openRecordingStream = { id -> openRecordingStream(id) }
         )
         webServer.start()
         snapshotHandler.post(snapshotRunnable)
@@ -461,6 +513,25 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
                 webAuthEnabled = value.toBoolean()
                 AppPreferences.setWebAuthEnabled(this, webAuthEnabled)
             }
+            "record_to_gallery_enabled" -> {
+                recordToGalleryEnabled = value.toBoolean()
+                AppPreferences.setRecordToGalleryEnabled(this, recordToGalleryEnabled)
+                onMain {
+                    if (recordToGalleryEnabled) startGalleryRecordingIfNeeded() else stopGalleryRecording()
+                }
+            }
+            "record_segment_minutes" -> {
+                value.toIntOrNull()?.let { requested ->
+                    AppPreferences.setRecordSegmentMinutes(this, requested)
+                    recordSegmentMinutes = AppPreferences.getRecordSegmentMinutes(this)
+                }
+            }
+            "record_storage_threshold_percent" -> {
+                value.toIntOrNull()?.let { requested ->
+                    AppPreferences.setRecordStorageThresholdPercent(this, requested)
+                    recordStorageThresholdPercent = AppPreferences.getRecordStorageThresholdPercent(this)
+                }
+            }
         }
     }
 
@@ -473,7 +544,7 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
                 restartServiceFully()
                 return
             }
-            cameraStreamer.stopStream()
+            stopStreamAndRecording()
             startStream()
             applyZoom()
         }
@@ -509,6 +580,17 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
             }
         }, 1000)
         stopSelf()
+    }
+
+    /**
+     * Stops the RTSP stream and, if a gallery segment is in flight, the recording too --
+     * recording must never survive a `prepareVideo()` call, which `startStream()` may make
+     * next. Replaces the bare `cameraStreamer.stopStream()` call so every stop site tears
+     * down recording the same way instead of each needing its own reminder to do so.
+     */
+    private fun stopStreamAndRecording() {
+        stopGalleryRecording()
+        cameraStreamer.stopStream()
     }
 
     private fun hasPermission(permission: String): Boolean =
@@ -706,6 +788,18 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
         // stay in sync across a full-intent restart.
         zoomLevel = AppPreferences.getZoomLevel(this)
         bitrateKbps = AppPreferences.getBitrateKbps(this)
+        recordToGalleryEnabled = intent?.getBooleanExtra(
+            "record_to_gallery_enabled", AppPreferences.getRecordToGalleryEnabled(this)
+        ) ?: AppPreferences.getRecordToGalleryEnabled(this)
+        AppPreferences.setRecordToGalleryEnabled(this, recordToGalleryEnabled)
+        recordSegmentMinutes = intent?.getIntExtra(
+            "record_segment_minutes", AppPreferences.getRecordSegmentMinutes(this)
+        ) ?: AppPreferences.getRecordSegmentMinutes(this)
+        AppPreferences.setRecordSegmentMinutes(this, recordSegmentMinutes)
+        recordStorageThresholdPercent = intent?.getIntExtra(
+            "record_storage_threshold_percent", AppPreferences.getRecordStorageThresholdPercent(this)
+        ) ?: AppPreferences.getRecordStorageThresholdPercent(this)
+        AppPreferences.setRecordStorageThresholdPercent(this, recordStorageThresholdPercent)
 
         applyForegroundServiceType()
 
@@ -722,7 +816,7 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
                     // it down properly in onDestroy(), then relaunch fresh below.
                     needsFullServiceRestart = true
                 } else {
-                    cameraStreamer.stopStream()
+                    stopStreamAndRecording()
                 }
             } else {
                 if (showPreview != newShowPreview) {
@@ -886,6 +980,7 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
                     if (useCamera1Fallback && cameraStreamerJustConstructed) correctCamera1DefaultFacing()
                     applyTimestampOverlay()
                     activeCodec = videoCodec
+                    startGalleryRecordingIfNeeded()
                 } else {
                     android.util.Log.w("CctvServerService", "Codec $selectedCodec preparation failed, falling back to H264")
                     cameraStreamer.setVideoCodec(VideoCodec.H264)
@@ -899,6 +994,7 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
                          // and persisting H264 silently threw away a setting the device
                          // is perfectly capable of honouring on the next attempt.
                          activeCodec = "H264"
+                         startGalleryRecordingIfNeeded()
                     } else {
                          android.util.Log.e("CctvServerService", "H264 fallback preparation also failed.")
                     }
@@ -907,6 +1003,317 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
         } catch (e: Exception) {
             e.printStackTrace()
         }
+    }
+
+    // --- Record to Gallery ---
+
+    /**
+     * Begins a new segment if recording is turned on, the stream is actually up, and we
+     * aren't already recording. Called both right after the stream starts and whenever a
+     * finished segment's [RecordController.Listener] confirms it's safe to start the next
+     * one -- see the class-level note on [recordRotationHandler].
+     */
+    private fun startGalleryRecordingIfNeeded() {
+        if (!recordToGalleryEnabled) return
+        if (!::cameraStreamer.isInitialized || !cameraStreamer.isStreaming) return
+        if (cameraStreamer.isRecording()) return
+        beginNewRecordingSegment()
+    }
+
+    /**
+     * One finished (or about-to-be-inserted) gallery segment. Exactly one of [pfd] / [path]
+     * is set: scoped storage (API 29+) has no filesystem path and must write through a
+     * MediaStore-opened [ParcelFileDescriptor]; pre-29 has a real [File] path and uses
+     * RootEncoder's string-path `startRecord` overload instead -- the `FileDescriptor`
+     * overload calls `MediaMuxer(FileDescriptor, int)`, which requires API 26 and would
+     * violate this app's minSdk 23 if it were the only path taken.
+     */
+    private class GalleryEntry(val uri: Uri, val pfd: ParcelFileDescriptor?, val path: String?)
+
+    private fun beginNewRecordingSegment() {
+        mediaStoreExecutor.execute {
+            val entry = try {
+                insertGalleryVideoEntry()
+            } catch (e: Exception) {
+                android.util.Log.e("CctvServerService", "Failed to create gallery recording entry", e)
+                null
+            }
+            if (entry == null) return@execute
+
+            onMain {
+                if (!::cameraStreamer.isInitialized || !cameraStreamer.isStreaming || !recordToGalleryEnabled) {
+                    // Setting was turned off or the stream stopped while the insert was
+                    // in flight -- discard the just-created (empty) MediaStore row instead
+                    // of leaving a stuck IS_PENDING entry in the gallery.
+                    mediaStoreExecutor.execute { discardGalleryEntry(entry) }
+                    return@onMain
+                }
+                try {
+                    val pfd = entry.pfd
+                    if (pfd != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        cameraStreamer.startRecord(pfd.fileDescriptor, recordListener)
+                    } else if (entry.path != null) {
+                        cameraStreamer.startRecord(entry.path, recordListener)
+                    } else {
+                        throw IllegalStateException("Gallery entry has neither a usable fd nor a path")
+                    }
+                    currentRecordingUri = entry.uri
+                    currentRecordingPfd = pfd
+                    isRecordingToGallery = true
+                    recordRotationHandler.postDelayed(
+                        { if (cameraStreamer.isRecording()) cameraStreamer.stopRecord() },
+                        recordSegmentMinutes * 60_000L
+                    )
+                } catch (e: Exception) {
+                    android.util.Log.e("CctvServerService", "startRecord failed", e)
+                    mediaStoreExecutor.execute { discardGalleryEntry(entry) }
+                }
+            }
+        }
+    }
+
+    /** Cancels any pending rotation and stops the in-flight segment without starting another. */
+    private fun stopGalleryRecording() {
+        recordRotationHandler.removeCallbacksAndMessages(null)
+        if (::cameraStreamer.isInitialized && cameraStreamer.isRecording()) {
+            cameraStreamer.stopRecord()
+        }
+    }
+
+    /**
+     * Runs once [RecordController] confirms the current segment actually stopped writing.
+     * Finalizes the gallery entry on [mediaStoreExecutor] and, if still wanted, chains
+     * straight into the next segment -- the only place a new segment is started besides
+     * the initial call from [startStream].
+     */
+    private fun finalizeCurrentSegment(rotateNext: Boolean) {
+        val uri = currentRecordingUri
+        val pfd = currentRecordingPfd
+        currentRecordingUri = null
+        currentRecordingPfd = null
+        isRecordingToGallery = false
+
+        if (uri == null) {
+            if (rotateNext) startGalleryRecordingIfNeeded()
+            return
+        }
+
+        mediaStoreExecutor.execute {
+            // Only set for the scoped-storage (API 29+) path -- the pre-29 path records
+            // straight through RootEncoder's string-path overload and never opens one.
+            try {
+                pfd?.close()
+            } catch (e: Exception) {
+                android.util.Log.e("CctvServerService", "Failed to close recording fd", e)
+            }
+            finalizeGalleryVideoEntry(uri)
+            enforceRetention()
+            if (rotateNext) onMain { startGalleryRecordingIfNeeded() }
+        }
+    }
+
+    /** Runs on [mediaStoreExecutor]. Creates the MediaStore row and opens it for writing. */
+    @Suppress("DEPRECATION") // MediaStore.Video.Media.DATA / Environment.getExternalStoragePublicDirectory: pre-Q only path
+    private fun insertGalleryVideoEntry(): GalleryEntry? {
+        val fileName = "CCTV_${SimpleDateFormat("yyyyMMddHHmmss", Locale.US).format(Date())}.mp4"
+        val resolver = contentResolver
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val values = ContentValues().apply {
+                put(MediaStore.Video.Media.DISPLAY_NAME, fileName)
+                put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
+                put(MediaStore.Video.Media.RELATIVE_PATH, RECORDING_RELATIVE_PATH)
+                put(MediaStore.Video.Media.IS_PENDING, 1)
+            }
+            val uri = resolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values) ?: run {
+                android.util.Log.e("CctvServerService", "MediaStore insert returned null")
+                return null
+            }
+            val pfd = resolver.openFileDescriptor(uri, "rw") ?: run {
+                resolver.delete(uri, null, null)
+                android.util.Log.e("CctvServerService", "openFileDescriptor returned null")
+                return null
+            }
+            return GalleryEntry(uri, pfd, path = null)
+        }
+
+        // Pre-API 29: no scoped storage, no RELATIVE_PATH/IS_PENDING columns. Requires
+        // WRITE_EXTERNAL_STORAGE, which MainActivity only requests on these OS versions.
+        if (!hasPermission(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)) {
+            android.util.Log.w("CctvServerService", "Gallery recording needs WRITE_EXTERNAL_STORAGE on this OS version")
+            return null
+        }
+        val moviesDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES), "CCTVApp")
+        if (!moviesDir.exists() && !moviesDir.mkdirs()) {
+            android.util.Log.e("CctvServerService", "Failed to create $moviesDir")
+            return null
+        }
+        val file = File(moviesDir, fileName)
+        val values = ContentValues().apply {
+            put(MediaStore.Video.Media.DISPLAY_NAME, fileName)
+            put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
+            put(MediaStore.Video.Media.DATA, file.absolutePath)
+        }
+        val uri = resolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values) ?: run {
+            android.util.Log.e("CctvServerService", "MediaStore insert returned null")
+            return null
+        }
+        // RootEncoder's string-path startRecord overload creates and writes the file
+        // itself (via MediaMuxer(String, int), available since API 18), so no
+        // ParcelFileDescriptor needs to be opened on this pre-Q path.
+        return GalleryEntry(uri, pfd = null, path = file.absolutePath)
+    }
+
+    /** Runs on [mediaStoreExecutor]. Marks a finished segment visible in the gallery. */
+    private fun finalizeGalleryVideoEntry(uri: Uri) {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val values = ContentValues().apply { put(MediaStore.Video.Media.IS_PENDING, 0) }
+                contentResolver.update(uri, values, null, null)
+            } else {
+                val path = queryDataPath(uri)
+                if (path != null) {
+                    MediaScannerConnection.scanFile(this, arrayOf(path), arrayOf("video/mp4"), null)
+                }
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("CctvServerService", "Failed to finalize gallery entry $uri", e)
+        }
+    }
+
+    /** Runs on [mediaStoreExecutor]. Removes a row that never got any recorded data. */
+    private fun discardGalleryEntry(entry: GalleryEntry) {
+        try {
+            entry.pfd?.close()
+        } catch (e: Exception) {
+            android.util.Log.e("CctvServerService", "Failed to close discarded recording fd", e)
+        }
+        try {
+            contentResolver.delete(entry.uri, null, null)
+        } catch (e: Exception) {
+            android.util.Log.e("CctvServerService", "Failed to discard gallery entry ${entry.uri}", e)
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun queryDataPath(uri: Uri): String? {
+        contentResolver.query(uri, arrayOf(MediaStore.Video.Media.DATA), null, null, null)?.use { cursor ->
+            if (cursor.moveToFirst()) return cursor.getString(0)
+        }
+        return null
+    }
+
+    /**
+     * Loop recording: once local storage usage crosses [recordStorageThresholdPercent],
+     * deletes the oldest finished segments under [RECORDING_RELATIVE_PATH] one at a
+     * time -- rechecking usage after each delete -- until it drops back under the
+     * threshold or there's nothing left to delete. Runs on [mediaStoreExecutor] after
+     * each segment finalizes, so a server left running indefinitely doesn't fill the
+     * device's storage.
+     */
+    private fun enforceRetention() {
+        try {
+            val projection = arrayOf(MediaStore.Video.Media._ID)
+            val sortOrder = "${MediaStore.Video.Media.DATE_ADDED} ASC"
+            val (selection, selectionArgs) = recordingsSelection()
+
+            val ids = ArrayDeque<Long>()
+            contentResolver.query(
+                MediaStore.Video.Media.EXTERNAL_CONTENT_URI, projection, selection, selectionArgs, sortOrder
+            )?.use { cursor ->
+                val idIndex = cursor.getColumnIndexOrThrow(MediaStore.Video.Media._ID)
+                while (cursor.moveToNext()) ids.add(cursor.getLong(idIndex))
+            }
+
+            val statFs = StatFs(Environment.getExternalStorageDirectory().path)
+            while (ids.isNotEmpty() && usedPercent(statFs) > recordStorageThresholdPercent) {
+                val id = ids.removeFirst()
+                val itemUri = android.content.ContentUris.withAppendedId(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, id)
+                contentResolver.delete(itemUri, null, null)
+                statFs.restat(Environment.getExternalStorageDirectory().path)
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("CctvServerService", "Failed to enforce recording retention", e)
+        }
+    }
+
+    /** Selects rows under [RECORDING_RELATIVE_PATH] -- shared by retention and listing. */
+    @Suppress("DEPRECATION") // MediaStore.Video.Media.DATA / Environment.getExternalStoragePublicDirectory: pre-Q only path
+    private fun recordingsSelection(): Pair<String, Array<String>> {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            "${MediaStore.Video.Media.RELATIVE_PATH} = ? AND ${MediaStore.Video.Media.IS_PENDING} = 0" to
+                arrayOf(RECORDING_RELATIVE_PATH)
+        } else {
+            val moviesDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES), "CCTVApp")
+            "${MediaStore.Video.Media.DATA} LIKE ?" to arrayOf("${moviesDir.absolutePath}/%")
+        }
+    }
+
+    /** Lists finished recordings under [RECORDING_RELATIVE_PATH], newest first. */
+    private fun listRecordings(): List<RecordingEntry> {
+        val entries = mutableListOf<RecordingEntry>()
+        try {
+            val projection = arrayOf(
+                MediaStore.Video.Media._ID,
+                MediaStore.Video.Media.DISPLAY_NAME,
+                MediaStore.Video.Media.SIZE,
+                MediaStore.Video.Media.DATE_ADDED
+            )
+            val sortOrder = "${MediaStore.Video.Media.DATE_ADDED} DESC"
+            val (selection, selectionArgs) = recordingsSelection()
+            contentResolver.query(
+                MediaStore.Video.Media.EXTERNAL_CONTENT_URI, projection, selection, selectionArgs, sortOrder
+            )?.use { cursor ->
+                val idIdx = cursor.getColumnIndexOrThrow(MediaStore.Video.Media._ID)
+                val nameIdx = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DISPLAY_NAME)
+                val sizeIdx = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.SIZE)
+                val dateIdx = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DATE_ADDED)
+                while (cursor.moveToNext()) {
+                    entries.add(
+                        RecordingEntry(
+                            id = cursor.getLong(idIdx),
+                            displayName = cursor.getString(nameIdx) ?: "recording.mp4",
+                            sizeBytes = cursor.getLong(sizeIdx),
+                            dateAddedMillis = cursor.getLong(dateIdx) * 1000L
+                        )
+                    )
+                }
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("CctvServerService", "Failed to list recordings", e)
+        }
+        return entries
+    }
+
+    /**
+     * Opens a recording for serving over HTTP. Re-validates [id] against
+     * [recordingsSelection] rather than trusting the caller, so this can't be used to
+     * read arbitrary gallery content the app didn't itself record.
+     */
+    private fun openRecordingStream(id: Long): InputStream? {
+        return try {
+            val (baseSelection, baseArgs) = recordingsSelection()
+            val selection = "$baseSelection AND ${MediaStore.Video.Media._ID} = ?"
+            val selectionArgs = baseArgs + id.toString()
+            var found = false
+            contentResolver.query(
+                MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+                arrayOf(MediaStore.Video.Media._ID),
+                selection, selectionArgs, null
+            )?.use { cursor -> found = cursor.moveToFirst() }
+            if (!found) return null
+            val uri = android.content.ContentUris.withAppendedId(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, id)
+            contentResolver.openInputStream(uri)
+        } catch (e: Exception) {
+            android.util.Log.e("CctvServerService", "Failed to open recording $id for serving", e)
+            null
+        }
+    }
+
+    private fun usedPercent(statFs: StatFs): Int {
+        val total = statFs.totalBytes
+        if (total <= 0L) return 0
+        return (((total - statFs.availableBytes) * 100) / total).toInt()
     }
 
     private fun applyTimestampOverlay() {
@@ -1314,7 +1721,7 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
     override fun surfaceDestroyed(holder: SurfaceHolder) {
         isSurfaceCreated = false
         if (::cameraStreamer.isInitialized && cameraStreamer.isStreaming) {
-            cameraStreamer.stopStream()
+            stopStreamAndRecording()
         }
     }
 
@@ -1323,10 +1730,13 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
         snapshotHandler.removeCallbacks(snapshotRunnable)
         timestampHandler.removeCallbacks(timestampRunnable)
         sensorManager?.unregisterListener(lightSensorListener)
-        
+        recordRotationHandler.removeCallbacksAndMessages(null)
+        stopGalleryRecording()
+        mediaStoreExecutor.shutdown()
+
         webServer.stop()
-        
-        if (::cameraStreamer.isInitialized) { 
+
+        if (::cameraStreamer.isInitialized) {
             try {
                 if (cameraStreamer.isStreaming) {
                     cameraStreamer.stopStream()

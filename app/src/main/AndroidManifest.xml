@@ -20,6 +20,9 @@
          battery management is free to suspend in the background is not a reliable
          camera, so this is treated as a hard requirement, like the overlay permission. -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <!-- Only needed on Android 9 and below with gallery recording on: API 29+ writes its
+         own MediaStore rows via scoped storage without any permission at all. -->
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />
 
     <uses-feature android:name="android.hardware.camera" android:required="true" />
 

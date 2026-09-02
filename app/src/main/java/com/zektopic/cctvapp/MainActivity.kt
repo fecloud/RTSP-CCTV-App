@@ -41,6 +41,11 @@ class MainActivity : AppCompatActivity() {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 add(Manifest.permission.POST_NOTIFICATIONS)
             }
+            // Only needed pre-scoped-storage: API 29+ writes its own gallery recordings
+            // via MediaStore without any permission at all.
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+                add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+            }
         }.toTypedArray()
 
     /** Only these block the server from running. */
@@ -153,6 +158,13 @@ class MainActivity : AppCompatActivity() {
         binding.switchAudio.isChecked = AppPreferences.getAudioEnabled(this)
         binding.switchStartOnBoot.isChecked = AppPreferences.getStartOnBoot(this)
         binding.switchAutoStart.isChecked = AppPreferences.getAutoStartOnLaunch(this)
+
+        // Load saved recording settings
+        binding.switchRecordToGallery.isChecked = AppPreferences.getRecordToGalleryEnabled(this)
+        binding.editRecordSegmentMinutes.setText(AppPreferences.getRecordSegmentMinutes(this).toString())
+        binding.editRecordStorageThresholdPercent.setText(
+            AppPreferences.getRecordStorageThresholdPercent(this).toString()
+        )
     }
 
     private fun setAuthFieldsEnabled(enabled: Boolean) {
@@ -317,6 +329,34 @@ class MainActivity : AppCompatActivity() {
         binding.switchAutoStart.setOnCheckedChangeListener { _, isChecked ->
             AppPreferences.setAutoStartOnLaunch(this, isChecked)
         }
+
+        binding.switchRecordToGallery.setOnCheckedChangeListener { _, isChecked ->
+            AppPreferences.setRecordToGalleryEnabled(this, isChecked)
+            sendSettingToService("record_to_gallery_enabled", isChecked.toString())
+        }
+
+        binding.editRecordSegmentMinutes.setOnFocusChangeListener { _, hasFocus ->
+            if (hasFocus) return@setOnFocusChangeListener
+            val minutes = binding.editRecordSegmentMinutes.text.toString().toIntOrNull()
+                ?.coerceIn(AppPreferences.RECORD_SEGMENT_MINUTES_MIN, AppPreferences.RECORD_SEGMENT_MINUTES_MAX)
+                ?: AppPreferences.DEFAULT_RECORD_SEGMENT_MINUTES
+            binding.editRecordSegmentMinutes.setText(minutes.toString())
+            AppPreferences.setRecordSegmentMinutes(this, minutes)
+            sendSettingToService("record_segment_minutes", minutes.toString())
+        }
+
+        binding.editRecordStorageThresholdPercent.setOnFocusChangeListener { _, hasFocus ->
+            if (hasFocus) return@setOnFocusChangeListener
+            val percent = binding.editRecordStorageThresholdPercent.text.toString().toIntOrNull()
+                ?.coerceIn(
+                    AppPreferences.RECORD_STORAGE_THRESHOLD_PERCENT_MIN,
+                    AppPreferences.RECORD_STORAGE_THRESHOLD_PERCENT_MAX
+                )
+                ?: AppPreferences.DEFAULT_RECORD_STORAGE_THRESHOLD_PERCENT
+            binding.editRecordStorageThresholdPercent.setText(percent.toString())
+            AppPreferences.setRecordStorageThresholdPercent(this, percent)
+            sendSettingToService("record_storage_threshold_percent", percent.toString())
+        }
     }
 
     /**
@@ -443,6 +483,12 @@ class MainActivity : AppCompatActivity() {
             putExtra("flashlight_enabled", binding.switchFlashlight.isChecked)
             putExtra("night_mode_enabled", binding.switchNightMode.isChecked)
             putExtra("vertical_flip_enabled", binding.switchVerticalFlip.isChecked)
+            putExtra("record_to_gallery_enabled", binding.switchRecordToGallery.isChecked)
+            putExtra("record_segment_minutes", AppPreferences.getRecordSegmentMinutes(this@MainActivity))
+            putExtra(
+                "record_storage_threshold_percent",
+                AppPreferences.getRecordStorageThresholdPercent(this@MainActivity)
+            )
         }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
