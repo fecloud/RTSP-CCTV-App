@@ -1256,7 +1256,6 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
             val projection = arrayOf(
                 MediaStore.Video.Media._ID,
                 MediaStore.Video.Media.DISPLAY_NAME,
-                MediaStore.Video.Media.SIZE,
                 MediaStore.Video.Media.DATE_ADDED
             )
             val sortOrder = "${MediaStore.Video.Media.DATE_ADDED} DESC"
@@ -1266,14 +1265,14 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
             )?.use { cursor ->
                 val idIdx = cursor.getColumnIndexOrThrow(MediaStore.Video.Media._ID)
                 val nameIdx = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DISPLAY_NAME)
-                val sizeIdx = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.SIZE)
                 val dateIdx = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DATE_ADDED)
                 while (cursor.moveToNext()) {
+                    val id = cursor.getLong(idIdx)
                     entries.add(
                         RecordingEntry(
-                            id = cursor.getLong(idIdx),
+                            id = id,
                             displayName = cursor.getString(nameIdx) ?: "recording.mp4",
-                            sizeBytes = cursor.getLong(sizeIdx),
+                            sizeBytes = fileSizeOf(id),
                             dateAddedMillis = cursor.getLong(dateIdx) * 1000L
                         )
                     )
@@ -1283,6 +1282,23 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
             android.util.Log.e("CctvServerService", "Failed to list recordings", e)
         }
         return entries
+    }
+
+    /**
+     * MediaStore's SIZE column isn't reliably populated for every OS/OEM combination
+     * this app has seen in the wild -- confirmed NULL on a MIUI/Android 6 device even
+     * for a fully-written, finalized segment, which made both the listed size and the
+     * download's Content-Length report 0 bytes. Stats the real file via its fd instead
+     * of trusting that column.
+     */
+    private fun fileSizeOf(id: Long): Long {
+        return try {
+            val uri = android.content.ContentUris.withAppendedId(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, id)
+            contentResolver.openFileDescriptor(uri, "r")?.use { it.statSize } ?: 0L
+        } catch (e: Exception) {
+            android.util.Log.e("CctvServerService", "Failed to stat recording $id", e)
+            0L
+        }
     }
 
     /**
