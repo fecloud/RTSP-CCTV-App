@@ -256,6 +256,7 @@ cross-origin `Origin` header are rejected with `403`.
 | `RECEIVE_BOOT_COMPLETED` | Only with start-on-boot | Restarting after a reboot. |
 | `ACCESS_WIFI_STATE` | Optional | Wi-Fi signal readout on the dashboard. |
 | `WRITE_EXTERNAL_STORAGE` | Only on Android 9 and below, with gallery recording on | Writing video segments to the gallery pre-scoped-storage. Not needed on Android 10+, where the app writes its own `MediaStore` rows without any permission. |
+| `READ_EXTERNAL_STORAGE` | Only on Android 9 and below | Listing and streaming saved recordings on `/recordings` — pre-scoped-storage `MediaStore` queries need this even for the app's own rows. Not needed on Android 10+. |
 
 No internet permission is used to send data anywhere. Nothing leaves your network.
 

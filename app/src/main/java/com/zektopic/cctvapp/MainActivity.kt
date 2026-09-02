@@ -41,10 +41,12 @@ class MainActivity : AppCompatActivity() {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 add(Manifest.permission.POST_NOTIFICATIONS)
             }
-            // Only needed pre-scoped-storage: API 29+ writes its own gallery recordings
-            // via MediaStore without any permission at all.
+            // Only needed pre-scoped-storage: API 29+ writes its own gallery recordings,
+            // and queries/streams them back out for the /recordings page, via MediaStore
+            // without any permission at all.
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
                 add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                add(Manifest.permission.READ_EXTERNAL_STORAGE)
             }
         }.toTypedArray()
 
@@ -613,9 +615,19 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
+    /**
+     * Requests whatever in [permissions] isn't granted yet -- not gated on
+     * [allPermissionsGranted], which only checks [requiredPermissions] (CAMERA). An
+     * install that already granted CAMERA in an earlier version satisfies that gate
+     * forever, so a later update adding e.g. storage permissions to [permissions] would
+     * otherwise never re-prompt for them.
+     */
     private fun requestPermissionsIfNeeded() {
-        if (!allPermissionsGranted()) {
-            ActivityCompat.requestPermissions(this, permissions, permissionRequestCode)
+        val missing = permissions.filter {
+            ContextCompat.checkSelfPermission(baseContext, it) != PackageManager.PERMISSION_GRANTED
+        }
+        if (missing.isNotEmpty()) {
+            ActivityCompat.requestPermissions(this, missing.toTypedArray(), permissionRequestCode)
         }
     }
 

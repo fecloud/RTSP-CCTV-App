@@ -23,6 +23,11 @@
     <!-- Only needed on Android 9 and below with gallery recording on: API 29+ writes its
          own MediaStore rows via scoped storage without any permission at all. -->
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />
+    <!-- Same pre-scoped-storage cutoff: querying MediaStore.Video for the /recordings
+         list and streaming a file back out both need this on API 28 and below, even for
+         rows the app itself inserted. Only API 29+ scoped storage exempts an app's own
+         MediaStore rows from needing it. -->
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="28" />
 
     <uses-feature android:name="android.hardware.camera" android:required="true" />
 
