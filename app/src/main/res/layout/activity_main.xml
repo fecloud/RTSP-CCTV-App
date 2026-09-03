@@ -164,22 +164,21 @@
                 </com.google.android.material.textfield.TextInputLayout>
 
                 <!-- Bitrate -->
-                <TextView
-                    android:id="@+id/label_bitrate"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="16dp"
-                    android:text="@string/bitrate"
-                    android:textAppearance="@style/TextAppearance.Material3.BodyMedium" />
-
-                <com.google.android.material.slider.Slider
-                    android:id="@+id/slider_bitrate"
+                <com.google.android.material.textfield.TextInputLayout
+                    android:id="@+id/menu_bitrate"
+                    style="@style/Widget.Material3.TextInputLayout.OutlinedBox.ExposedDropdownMenu"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:stepSize="100"
-                    android:value="4000"
-                    android:valueFrom="500"
-                    android:valueTo="8000" />
+                    android:layout_marginTop="12dp"
+                    android:hint="@string/bitrate">
+
+                    <AutoCompleteTextView
+                        android:id="@+id/spinner_bitrate"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:inputType="none"
+                        tools:ignore="LabelFor" />
+                </com.google.android.material.textfield.TextInputLayout>
 
                 <!-- Force Software Codec -->
                 <com.google.android.material.materialswitch.MaterialSwitch

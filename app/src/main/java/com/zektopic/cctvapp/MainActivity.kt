@@ -61,14 +61,12 @@ class MainActivity : AppCompatActivity() {
     private val zoomDebounceHandler = Handler(Looper.getMainLooper())
     private var zoomDebounceRunnable: Runnable? = null
 
-    // Same debouncing, for the bitrate slider.
-    private val bitrateDebounceHandler = Handler(Looper.getMainLooper())
-    private var bitrateDebounceRunnable: Runnable? = null
-
     private val resolutions = arrayOf("640x480", "1280x720", "1920x1080", "Max")
     private val codecs = arrayOf("H264", "H265", "AV1")
     private val overlayPositions = arrayOf("Top Left", "Top Right", "Bottom Left", "Bottom Right")
     private val overlaySizes = arrayOf("Small", "Medium", "Large")
+    private val bitrateLabels = arrayOf("500 Kbps", "1 Mbps", "2 Mbps", "4 Mbps", "6 Mbps", "8 Mbps")
+    private val bitrateKbpsValues = intArrayOf(500, 1000, 2000, 4000, 6000, 8000)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -105,6 +103,10 @@ class MainActivity : AppCompatActivity() {
         (binding.spinnerOverlaySize as? AutoCompleteTextView)?.setAdapter(
             ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, overlaySizes)
         )
+
+        (binding.spinnerBitrate as? AutoCompleteTextView)?.setAdapter(
+            ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, bitrateLabels)
+        )
     }
 
     private fun loadSavedSettings() {
@@ -123,8 +125,9 @@ class MainActivity : AppCompatActivity() {
         )
 
         // Load saved bitrate
-        binding.sliderBitrate.value = AppPreferences.getBitrateKbps(this).toFloat()
-            .coerceIn(binding.sliderBitrate.valueFrom, binding.sliderBitrate.valueTo)
+        val savedBitrateIndex = bitrateKbpsValues.indexOf(AppPreferences.getBitrateKbps(this))
+            .let { if (it >= 0) it else bitrateKbpsValues.indexOf(AppPreferences.DEFAULT_BITRATE_KBPS) }
+        (binding.spinnerBitrate as? AutoCompleteTextView)?.setText(bitrateLabels[savedBitrateIndex], false)
 
         // Load saved toggles
         binding.switchForceSoftware.isChecked = AppPreferences.getForceSoftware(this)
@@ -226,6 +229,12 @@ class MainActivity : AppCompatActivity() {
             restartServer()
         }
 
+        (binding.spinnerBitrate as? AutoCompleteTextView)?.setOnItemClickListener { _, _, position, _ ->
+            val kbps = bitrateKbpsValues[position]
+            AppPreferences.setBitrateKbps(this, kbps)
+            sendSettingToService("bitrate_kbps", kbps.toString())
+        }
+
         // Auth listeners
         binding.switchAuth.setOnCheckedChangeListener { _, isChecked ->
             AppPreferences.setAuthEnabled(this, isChecked)
@@ -311,7 +320,6 @@ class MainActivity : AppCompatActivity() {
         }
 
         setupZoomSlider()
-        setupBitrateSlider()
 
         binding.switchWebAuth.setOnCheckedChangeListener { _, isChecked ->
             AppPreferences.setWebAuthEnabled(this, isChecked)
@@ -381,25 +389,6 @@ class MainActivity : AppCompatActivity() {
             override fun onStopTrackingTouch(slider: Slider) {
                 zoomDebounceRunnable?.let { zoomDebounceHandler.removeCallbacks(it) }
                 sendSettingToService("zoom_level", slider.value.toString())
-            }
-        })
-    }
-
-    /** Same debounced push-while-dragging pattern as [setupZoomSlider]. */
-    private fun setupBitrateSlider() {
-        binding.sliderBitrate.addOnChangeListener { _, value, fromUser ->
-            if (!fromUser) return@addOnChangeListener
-            AppPreferences.setBitrateKbps(this, value.toInt())
-            bitrateDebounceRunnable?.let { bitrateDebounceHandler.removeCallbacks(it) }
-            val runnable = Runnable { sendSettingToService("bitrate_kbps", value.toInt().toString()) }
-            bitrateDebounceRunnable = runnable
-            bitrateDebounceHandler.postDelayed(runnable, 120)
-        }
-        binding.sliderBitrate.addOnSliderTouchListener(object : Slider.OnSliderTouchListener {
-            override fun onStartTrackingTouch(slider: Slider) {}
-            override fun onStopTrackingTouch(slider: Slider) {
-                bitrateDebounceRunnable?.let { bitrateDebounceHandler.removeCallbacks(it) }
-                sendSettingToService("bitrate_kbps", slider.value.toInt().toString())
             }
         })
     }
