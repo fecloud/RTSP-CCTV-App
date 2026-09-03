@@ -1152,18 +1152,12 @@ class WebServer(
                 val safeName = WebAuth.escapeHtml(entry.displayName)
                 val safeDate = WebAuth.escapeHtml(dateFormat.format(java.util.Date(entry.dateAddedMillis)))
                 """
-                <div class="setting-row">
+                <a class="setting-row" href="/recording.mp4?id=${entry.id}" target="_blank">
                     <div>
                         <span class="setting-label">$safeName</span>
                         <div class="setting-sublabel">${formatBytes(entry.sizeBytes)} &middot; $safeDate</div>
                     </div>
-                    <div style="display:flex; gap:12px;">
-                        <a href="/recording.mp4?id=${entry.id}" target="_blank"
-                           style="color:var(--accent); text-decoration:none; font-weight:600;">Play</a>
-                        <a href="/recording.mp4?id=${entry.id}&download=1"
-                           style="color:var(--text-secondary); text-decoration:none; font-weight:600;">Download</a>
-                    </div>
-                </div>
+                </a>
                 """.trimIndent()
             }
         }
@@ -1220,8 +1214,12 @@ class WebServer(
             justify-content: space-between;
             padding: 16px 0;
             gap: 16px;
+            color: inherit;
+            text-decoration: none;
+            cursor: pointer;
         }
         .setting-row + .setting-row { border-top: 1px solid var(--border); }
+        .setting-row:hover .setting-label { color: var(--accent); }
         .setting-label { font-size: 15px; font-weight: 500; }
         .setting-sublabel { font-size: 12px; color: var(--text-secondary); margin-top: 2px; }
         .empty-state { padding: 32px 0; text-align: center; color: var(--text-secondary); }
