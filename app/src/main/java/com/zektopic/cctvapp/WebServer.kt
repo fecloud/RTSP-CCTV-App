@@ -755,13 +755,18 @@ class WebServer(
                     </select>
                 </div>
             </div>
-            <div class="setting-row" style="flex-direction:column; align-items:stretch; gap:8px;">
-                <div style="display:flex; justify-content:space-between;">
-                    <span class="setting-label">Bitrate</span>
-                    <span class="setting-sublabel" id="bitrateValueText">4000 kbps</span>
+            <div class="setting-row">
+                <span class="setting-label">Bitrate</span>
+                <div class="select-wrap">
+                    <select id="bitrateSelect" onchange="changeBitrate(this.value)">
+                        <option value="500">500 Kbps</option>
+                        <option value="1000">1 Mbps</option>
+                        <option value="2000">2 Mbps</option>
+                        <option value="4000">4 Mbps</option>
+                        <option value="6000">6 Mbps</option>
+                        <option value="8000">8 Mbps</option>
+                    </select>
                 </div>
-                <input type="range" class="range-slider" id="bitrateSlider" min="500" max="8000" step="100" value="4000"
-                       oninput="onBitrateInput(this.value)" onchange="onBitrateChange(this.value)">
             </div>
             <div class="setting-row">
                 <div>
@@ -956,26 +961,9 @@ class WebServer(
             fetch('/action/set-setting?key=zoom_level&value=' + encodeURIComponent(parseFloat(v).toFixed(2)), POST);
         }
 
-        // --- Bitrate slider ---
-        const bitrateSlider = document.getElementById('bitrateSlider');
-        const bitrateValueText = document.getElementById('bitrateValueText');
-        let bitrateDragging = false;
-        let bitrateDebounceTimer = null;
-        bitrateSlider.addEventListener('pointerdown', () => { bitrateDragging = true; });
-        bitrateSlider.addEventListener('pointerup', () => { setTimeout(() => { bitrateDragging = false; }, 400); });
-
-        function onBitrateInput(v) {
-            bitrateValueText.textContent = v + ' kbps';
-            clearTimeout(bitrateDebounceTimer);
-            bitrateDebounceTimer = setTimeout(() => pushBitrate(v), 120);
-        }
-        function onBitrateChange(v) {
-            clearTimeout(bitrateDebounceTimer);
-            pushBitrate(v);
-            showToast('Bitrate: ' + v + ' kbps');
-        }
-        function pushBitrate(v) {
-            fetch('/action/set-setting?key=bitrate_kbps&value=' + encodeURIComponent(v), POST);
+        function changeBitrate(v) {
+            fetch('/action/set-setting?key=bitrate_kbps&value=' + encodeURIComponent(v), POST)
+                .then(() => { showToast('Bitrate: ' + v + ' kbps'); fetchStatus(); });
         }
 
         // --- Preview auto-refresh ---
@@ -1038,10 +1026,7 @@ class WebServer(
                         zoomSlider.value = data.zoomLevel;
                         zoomValueText.textContent = Number(data.zoomLevel).toFixed(1) + 'x';
                     }
-                    if (!bitrateDragging) {
-                        bitrateSlider.value = data.bitrateKbps;
-                        bitrateValueText.textContent = data.bitrateKbps + ' kbps';
-                    }
+                    document.getElementById('bitrateSelect').value = data.bitrateKbps;
 
                     // Sync recording
                     document.getElementById('toggleRecordToGallery').checked = data.recordToGalleryEnabled;
