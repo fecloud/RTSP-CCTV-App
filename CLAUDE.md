@@ -35,46 +35,70 @@ RootEncoder transitively and broke a build whose CI had already passed.
 
 ## Architecture
 
-Everything lives under `app/src/main/java/com/zektopic/cctvapp/` (flat package, no
-sub-packages). One `CctvServerService` (a `Service`, ~1100 lines) owns the entire
-pipeline; `MainActivity` is a thin settings UI that starts/stops it via `Intent` extras,
-mirrored by an HTTP-driven path through `WebServer`.
+`app/src/main/java/com/zektopic/cctvapp/` is split into sub-packages by concern (it used
+to be one flat package, but it grew past the point that stayed readable):
 
-| File | Responsibility |
-|---|---|
-| `CctvServerService.kt` | Foreground service: camera, encoder, stream lifecycle, snapshot loop, overlays, flashlight/night mode, zoom |
-| `WebServer.kt` | NanoHTTPD server: dashboard HTML, `/status`, `/action/*` — wires HTTP requests to callbacks passed in from the service |
-| `WebAuth.kt` | HTTP Basic auth, Base64, constant-time compare, CSRF-style Origin check, HTML escaping — deliberately Android-API-free so it runs as plain JVM unit tests |
-| `AppPreferences.kt` | SharedPreferences wrapper for every persisted setting |
-| `MainActivity.kt` | Settings UI, permission requests, starts/stops the service |
-| `BootReceiver.kt` | Optional start-on-boot (blocked by Android 14+ background-start restrictions; posts a "tap to resume" notification instead) |
+| Package | Files | Responsibility |
+|---|---|---|
+| *(root)* | `MainActivity.kt`, `BootReceiver.kt` | App entry points — the two components Android launches by class name |
+| `.service` | `CctvServerService.kt`, `GalleryRecordingManager.kt`, `OverlayWindow.kt`, `ServiceNotificationUtil.kt` | The foreground service: camera/encoder/stream lifecycle, gallery recording, the overlay window, the notification |
+| `.settings` | `AppPreferences.kt`, `ServiceSettings.kt`, `SettingsRepository.kt`, `SettingEffects.kt`, `SettingUpdateHandler.kt` | Settings persistence and the shared in-memory data source (see "Settings: one shared data source" below) |
+| `.web` | `WebServer.kt`, `WebAuth.kt` | NanoHTTPD dashboard server + HTTP Basic auth |
+| `.camera` | `CameraResolutionUtil.kt` | Camera2 supported-resolution querying, shared by the service, `GalleryRecordingManager`, and `MainActivity` |
+| `.device` | `DeviceStatsUtil.kt`, `ThermalZoneUtil.kt` | Battery/CPU/Wi-Fi telemetry surfaced in `/status` and the timestamp overlay |
+
+`CctvServerService` no longer owns the whole pipeline itself — it composes the classes in
+`.service` and reacts to `.settings`'s shared repository (see below). `MainActivity` is a
+thin settings UI; it does **not** talk to a running service via `Intent` for settings
+anymore (see "Settings: one shared data source").
 
 ### Data flow
 
-One JPEG capture loop (`snapshotRunnable` in `CctvServerService`) feeds the dashboard's
-`/shot.jpg`. It runs at `ACTIVE_SNAPSHOT_INTERVAL_MS` (500ms) while a dashboard viewer is
-active (tracked via `lastSnapshotRequestMs` / `VIEWER_IDLE_TIMEOUT_MS`), and idles at
-`IDLE_SNAPSHOT_INTERVAL_MS` (3s) otherwise — capture+JPEG-encode is the single biggest
-battery cost, so avoiding it when nobody is watching matters. The RTSP stream itself
-comes straight off the hardware encoder via `RtspServerCamera2` (RootEncoder/RTSP-Server),
-independent of the snapshot loop.
+One JPEG capture loop (`CctvServerService.startSnapshotLoop`, a coroutine) feeds the
+dashboard's `/shot.jpg`. It runs at `ACTIVE_SNAPSHOT_INTERVAL_MS` (500ms) while a
+dashboard viewer is active (tracked via `lastSnapshotRequestMs` / `VIEWER_IDLE_TIMEOUT_MS`),
+and idles at `IDLE_SNAPSHOT_INTERVAL_MS` (3s) otherwise — capture+JPEG-encode is the
+single biggest battery cost, so avoiding it when nobody is watching matters. The RTSP
+stream itself comes straight off the hardware encoder via `RtspServerCamera2`
+(RootEncoder/RTSP-Server), independent of the snapshot loop.
 
 ### Threading rules
 
 `WebServer` callbacks arrive on NanoHTTPD worker threads, but the camera/overlay view
-can only be touched from the main thread (`updateViewLayout` throws otherwise). The
-pattern throughout `CctvServerService` is: **assign state fields synchronously** on the
-calling thread (so an immediate `/status` poll reflects the change), then **post only the
-side effect** via `onMain { ... }`. All state shared between the main thread and NanoHTTPD
-threads is `@Volatile`.
+can only be touched from the main thread (`updateViewLayout` throws otherwise).
+`CctvServerService.onMain { ... }` posts a block onto `serviceScope`
+(`Dispatchers.Main.immediate`) to enforce that — launched from the main thread it runs
+synchronously (no dispatch), launched from a worker thread it posts to the main looper.
+Every periodic/delayed loop in the service (the snapshot loop, the timestamp ticker, the
+post-stream-start reapply delay) is also a `serviceScope` coroutine, all cancelled
+together in `onDestroy`. All state shared between the main thread and NanoHTTPD threads
+that isn't routed through `SettingsRepository` (see below) is `@Volatile`.
 
-### Settings duplication
+### Settings: one shared data source
 
-Every setting can be changed two ways — `MainActivity` restarting the service with new
-`Intent` extras (`onStartCommand`), or the dashboard hitting `WebServer`'s
-`onSettingUpdate` callback — and both paths write through `AppPreferences` so they stay
-in sync. When adding a new setting, wire it in both places plus the HTTP API table in
-`README.md`.
+Every setting lives in one place: `SettingsRepository` (`.settings`), an in-process
+singleton wrapping a `MutableStateFlow<ServiceSettings>`. `MainActivity`,
+`WebServer`'s dashboard (via `SettingUpdateHandler`), and `CctvServerService` all read
+and write it directly — safe because the service has no `android:process` of its own, so
+everything runs in the same process. `SettingsRepository.update(context) { it.copy(...) }`
+persists to `AppPreferences` and publishes the new snapshot in one call.
+
+`CctvServerService.startSettingsEffectsCollector` is the *only* place a settings change
+turns into a side effect (restarting the stream, reapplying the flashlight, resizing the
+preview, ...): it diffs the old and new `ServiceSettings` snapshot and calls the matching
+`SettingEffects` method. Nothing else should pair a settings write with an inline
+`apply*`/`restart*` call — add the reaction to the collector instead. See its kdoc for why
+value-application effects (safe to call anytime) and state-transition effects (must not
+fire on the collector's first observed emission, to avoid a redundant restart right after
+a cold start) are deliberately handled with different rules.
+
+Because of this, starting/restarting the service (`MainActivity.ensureServiceStarted`,
+`BootReceiver`) sends a **bare** `Intent` with no extras — `CctvServerService.onCreate`
+loads current settings itself via `SettingsRepository.ensureLoaded`. When adding a new
+setting: add the field to `ServiceSettings`, persist it in
+`SettingsRepository.persist`, read/write it from `MainActivity` and
+`SettingUpdateHandler`, and (if it should do something) add its diff check to
+`startSettingsEffectsCollector` — plus the HTTP API table in `README.md`.
 
 ### Security model (read `WebAuth.kt` and the README "Security" section before touching auth)
 
@@ -82,10 +106,14 @@ in sync. When adding a new setting, wire it in both places plus the HTTP API tab
   once on first run. `isAuthorized` intentionally fails *open* when auth is enabled but no
   credentials are configured yet, to avoid locking the owner out — `MainActivity` is
   responsible for seeding the generated password before that gap matters.
-- `CctvServerService` reads username/password **live from `AppPreferences`** in the
-  `WebServer` callbacks rather than from its own cached fields, because the cache is
-  populated in `onCreate()` before `MainActivity` seeds the first-run password — a prior
-  bug from this order once served the dashboard unauthenticated.
+- `CctvServerService` reads username/password/`webAuthEnabled` **live from
+  `SettingsRepository`** in the `WebServer` callbacks rather than from its own cached
+  fields — a prior bug (from a cache populated in `onCreate()` before `MainActivity`
+  seeded the first-run password) once served the dashboard unauthenticated. Reading
+  through the shared repository keeps this safe post-`SettingsRepository`:
+  `MainActivity` seeds and writes the generated password into it *before* it ever starts
+  the service, and every subsequent read anywhere goes through the same singleton, so
+  there is no separate cache left to go stale.
 - `WebAuth.isOriginAllowed` blocks cross-origin requests (CSRF from a browser tab open on
   another site) while still allowing non-browser clients (curl, NVRs) that send no
   `Origin` header at all.
@@ -97,9 +125,10 @@ in sync. When adding a new setting, wire it in both places plus the HTTP API tab
 Logic that can run without Android APIs is deliberately kept that way — `WebAuth`, and
 `MainActivity`'s `parseResolution` (covered by `ResolutionParsingTest`) — specifically so
 it has JVM unit test coverage (`app/src/test`) rather than requiring a device/emulator.
-`app/src/androidTest` is for the few things that genuinely need one (e.g.
-`WebServerAuthInstrumentedTest`). When adding logic, prefer keeping it
-Android-API-free and under `app/src/test` if at all possible.
+`app/src/androidTest` is for the few things that genuinely need a device/emulator (a real
+socket, a real `SettingsRepository`, etc.) — currently just placeholder boilerplate. When
+adding logic, prefer keeping it Android-API-free and under `app/src/test` if at all
+possible.
 
 ### Known constraints (don't "fix" without reading the comment first)
 

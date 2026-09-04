@@ -11,8 +11,6 @@ import android.net.ConnectivityManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
 import android.os.PowerManager
 import android.provider.Settings
 import android.widget.ArrayAdapter
@@ -22,8 +20,21 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.google.android.material.slider.Slider
+import com.zektopic.cctvapp.camera.CameraResolutionUtil
 import com.zektopic.cctvapp.databinding.ActivityMainBinding
+import com.zektopic.cctvapp.service.CctvServerService
+import com.zektopic.cctvapp.settings.AppPreferences
+import com.zektopic.cctvapp.settings.SettingsRepository
+import com.zektopic.cctvapp.web.WebAuth
+import com.zektopic.cctvapp.web.WebServer
 import java.net.Inet4Address
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 class MainActivity : AppCompatActivity() {
 
@@ -53,11 +64,12 @@ class MainActivity : AppCompatActivity() {
 
     private val permissionRequestCode = 100
 
-    // Debounces the zoom slider's live push to the service: a drag fires
-    // addOnChangeListener far more often than a toggle fires its listener, and each
-    // push is a startService() call.
-    private val zoomDebounceHandler = Handler(Looper.getMainLooper())
-    private var zoomDebounceRunnable: Runnable? = null
+    private val activityScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+
+    // Debounces the zoom slider's live push to SettingsRepository: a drag fires
+    // addOnChangeListener far more often than a toggle fires its listener -- see
+    // setupZoomSlider().
+    private var zoomDebounceJob: Job? = null
 
     // Populated in onCreate() from the camera's actual supported sizes; this is only
     // the fallback used if that query comes back empty.
@@ -70,12 +82,17 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        SettingsRepository.ensureLoaded(this)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
         resolutions = CameraResolutionUtil.getSupportedResolutions(this)
             .map { "${it.first}x${it.second}" }
             .ifEmpty { DEFAULT_RESOLUTIONS }
+
+        val (zoomMin, zoomMax) = CameraResolutionUtil.getZoomRange(this)
+        binding.sliderZoomLevel.valueFrom = zoomMin
+        binding.sliderZoomLevel.valueTo = zoomMax
 
         setupViews()
         requestPermissionsIfNeeded()
@@ -114,66 +131,62 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun loadSavedSettings() {
+        val s = SettingsRepository.current
+
         // Load saved codec
-        val savedCodec = AppPreferences.getVideoCodec(this)
         (binding.spinnerCodec as? AutoCompleteTextView)?.setText(
-            if (savedCodec in codecs) savedCodec else codecs.first(), false
+            if (s.videoCodec in codecs) s.videoCodec else codecs.first(), false
         )
 
         // Load saved resolution
-        val savedWidth = AppPreferences.getVideoWidth(this)
-        val savedHeight = AppPreferences.getVideoHeight(this)
-        val savedResolution = "${savedWidth}x${savedHeight}"
+        val savedResolution = "${s.videoWidth}x${s.videoHeight}"
         (binding.spinnerResolution as? AutoCompleteTextView)?.setText(
             if (savedResolution in resolutions) savedResolution else resolutions.first(), false
         )
 
         // Load saved bitrate
-        val savedBitrateIndex = bitrateKbpsValues.indexOf(AppPreferences.getBitrateKbps(this))
+        val savedBitrateIndex = bitrateKbpsValues.indexOf(s.bitrateKbps)
             .let { if (it >= 0) it else bitrateKbpsValues.indexOf(AppPreferences.DEFAULT_BITRATE_KBPS) }
         (binding.spinnerBitrate as? AutoCompleteTextView)?.setText(bitrateLabels[savedBitrateIndex], false)
 
         // Load saved toggles
-        binding.switchForceSoftware.isChecked = AppPreferences.getForceSoftware(this)
-        binding.switchPreview.isChecked = AppPreferences.getShowPreview(this)
+        binding.switchPreview.isChecked = s.showPreview
 
         // Load saved auth settings
-        val authEnabled = AppPreferences.getAuthEnabled(this)
-        binding.switchAuth.isChecked = authEnabled
-        binding.editUsername.setText(AppPreferences.getUsername(this))
-        binding.editPassword.setText(AppPreferences.getPassword(this))
-        setAuthFieldsEnabled(authEnabled)
+        binding.switchAuth.isChecked = s.authEnabled
+        binding.editUsername.setText(s.authUsername)
+        binding.editPassword.setText(s.authPassword)
+        setAuthFieldsEnabled(s.authEnabled)
 
         // Load saved overlay settings
-        binding.switchTimestamp.isChecked = AppPreferences.getShowTimestamp(this)
-        val savedPosition = AppPreferences.getTimestampPosition(this)
+        binding.switchTimestamp.isChecked = s.showTimestamp
         (binding.spinnerOverlayPosition as? AutoCompleteTextView)?.setText(
-            if (savedPosition in overlayPositions) savedPosition else overlayPositions.first(), false
+            if (s.timestampPosition in overlayPositions) s.timestampPosition else overlayPositions.first(), false
         )
-        val savedSize = AppPreferences.getTimestampSize(this)
         (binding.spinnerOverlaySize as? AutoCompleteTextView)?.setText(
-            if (savedSize in overlaySizes) savedSize else overlaySizes[1], false
+            if (s.timestampSize in overlaySizes) s.timestampSize else overlaySizes[1], false
         )
 
         // Load saved flashlight & night mode settings
-        binding.switchFlashlight.isChecked = AppPreferences.getFlashlightEnabled(this)
-        binding.switchNightMode.isChecked = AppPreferences.getNightModeEnabled(this)
-        binding.switchVerticalFlip.isChecked = AppPreferences.getVerticalFlipEnabled(this)
-        binding.sliderZoomLevel.value = AppPreferences.getZoomLevel(this)
+        binding.switchFlashlight.isChecked = s.flashlightEnabled
+        binding.switchNightMode.isChecked = s.nightModeEnabled
+        binding.switchVerticalFlip.isChecked = s.verticalFlipEnabled
+        binding.sliderZoomLevel.value = s.zoomLevel
             .coerceIn(binding.sliderZoomLevel.valueFrom, binding.sliderZoomLevel.valueTo)
 
-        // Load security & startup settings
-        binding.switchWebAuth.isChecked = AppPreferences.getWebAuthEnabled(this)
-        binding.switchAudio.isChecked = AppPreferences.getAudioEnabled(this)
+        // Load security settings
+        binding.switchWebAuth.isChecked = s.webAuthEnabled
+        binding.switchAudio.isChecked = s.audioEnabled
+
+        // Startup behavior flags aren't part of ServiceSettings -- the service never
+        // reads them, so they stay direct AppPreferences reads.
         binding.switchStartOnBoot.isChecked = AppPreferences.getStartOnBoot(this)
         binding.switchAutoStart.isChecked = AppPreferences.getAutoStartOnLaunch(this)
 
         // Load saved recording settings
-        binding.switchRecordToGallery.isChecked = AppPreferences.getRecordToGalleryEnabled(this)
-        binding.editRecordSegmentMinutes.setText(AppPreferences.getRecordSegmentMinutes(this).toString())
-        binding.editRecordStorageThresholdPercent.setText(
-            AppPreferences.getRecordStorageThresholdPercent(this).toString()
-        )
+        binding.switchRecordToGallery.isChecked = s.recordToGalleryEnabled
+        binding.editRecordSegmentMinutes.setText(s.recordSegmentMinutes.toString())
+        binding.editRecordStorageThresholdPercent.setText(s.recordStorageThresholdPercent.toString())
     }
 
     private fun setAuthFieldsEnabled(enabled: Boolean) {
@@ -207,44 +220,28 @@ class MainActivity : AppCompatActivity() {
         }
 
         binding.switchPreview.setOnCheckedChangeListener { _, isChecked ->
-            AppPreferences.setShowPreview(this, isChecked)
-            if (binding.switchServer.isChecked) {
-                val intent = Intent(this, CctvServerService::class.java).apply {
-                    action = "ACTION_TOGGLE_PREVIEW"
-                    putExtra("show_preview", isChecked)
-                }
-                startService(intent)
-            }
-        }
-
-        binding.switchForceSoftware.setOnCheckedChangeListener { _, isChecked ->
-            AppPreferences.setForceSoftware(this, isChecked)
-            restartServer()
+            SettingsRepository.update(this) { it.copy(showPreview = isChecked) }
         }
 
         (binding.spinnerResolution as? AutoCompleteTextView)?.setOnItemClickListener { _, _, position, _ ->
             val (width, height) = parseResolution(resolutions[position])
-            AppPreferences.setResolution(this, width, height)
-            restartServer()
+            SettingsRepository.update(this) { it.copy(videoWidth = width, videoHeight = height) }
         }
 
         (binding.spinnerCodec as? AutoCompleteTextView)?.setOnItemClickListener { _, _, position, _ ->
-            AppPreferences.setVideoCodec(this, codecs[position])
-            restartServer()
+            SettingsRepository.update(this) { it.copy(videoCodec = codecs[position]) }
         }
 
         (binding.spinnerBitrate as? AutoCompleteTextView)?.setOnItemClickListener { _, _, position, _ ->
             val kbps = bitrateKbpsValues[position]
-            AppPreferences.setBitrateKbps(this, kbps)
-            sendSettingToService("bitrate_kbps", kbps.toString())
+            SettingsRepository.update(this) { it.copy(bitrateKbps = kbps) }
         }
 
         // Auth listeners
         binding.switchAuth.setOnCheckedChangeListener { _, isChecked ->
-            AppPreferences.setAuthEnabled(this, isChecked)
+            SettingsRepository.update(this) { it.copy(authEnabled = isChecked) }
             setAuthFieldsEnabled(isChecked)
             updateNetworkInfo()
-            restartServer()
         }
 
         // Persist credentials on focus loss, but only restart the stream when they
@@ -266,18 +263,15 @@ class MainActivity : AppCompatActivity() {
 
         // Overlay listeners
         binding.switchTimestamp.setOnCheckedChangeListener { _, isChecked ->
-            AppPreferences.setShowTimestamp(this, isChecked)
-            restartServer()
+            SettingsRepository.update(this) { it.copy(showTimestamp = isChecked) }
         }
 
         (binding.spinnerOverlayPosition as? AutoCompleteTextView)?.setOnItemClickListener { _, _, position, _ ->
-            AppPreferences.setTimestampPosition(this, overlayPositions[position])
-            restartServer()
+            SettingsRepository.update(this) { it.copy(timestampPosition = overlayPositions[position]) }
         }
 
         (binding.spinnerOverlaySize as? AutoCompleteTextView)?.setOnItemClickListener { _, _, position, _ ->
-            AppPreferences.setTimestampSize(this, overlaySizes[position])
-            restartServer()
+            SettingsRepository.update(this) { it.copy(timestampSize = overlaySizes[position]) }
         }
 
         // Copy buttons
@@ -291,49 +285,26 @@ class MainActivity : AppCompatActivity() {
 
         // Flashlight & Night Mode listeners
         binding.switchFlashlight.setOnCheckedChangeListener { _, isChecked ->
-            AppPreferences.setFlashlightEnabled(this, isChecked)
-            if (binding.switchServer.isChecked) {
-                val intent = Intent(this, CctvServerService::class.java).apply {
-                    action = "ACTION_TOGGLE_FLASHLIGHT"
-                    putExtra("flashlight_enabled", isChecked)
-                }
-                startService(intent)
-            }
+            SettingsRepository.update(this) { it.copy(flashlightEnabled = isChecked) }
         }
 
         binding.switchNightMode.setOnCheckedChangeListener { _, isChecked ->
-            AppPreferences.setNightModeEnabled(this, isChecked)
-            if (binding.switchServer.isChecked) {
-                val intent = Intent(this, CctvServerService::class.java).apply {
-                    action = "ACTION_TOGGLE_NIGHT_MODE"
-                    putExtra("night_mode_enabled", isChecked)
-                }
-                startService(intent)
-            }
+            SettingsRepository.update(this) { it.copy(nightModeEnabled = isChecked) }
         }
 
         binding.switchVerticalFlip.setOnCheckedChangeListener { _, isChecked ->
-            AppPreferences.setVerticalFlipEnabled(this, isChecked)
-            if (binding.switchServer.isChecked) {
-                val intent = Intent(this, CctvServerService::class.java).apply {
-                    action = "ACTION_TOGGLE_VERTICAL_FLIP"
-                    putExtra("vertical_flip_enabled", isChecked)
-                }
-                startService(intent)
-            }
+            SettingsRepository.update(this) { it.copy(verticalFlipEnabled = isChecked) }
         }
 
         setupZoomSlider()
 
         binding.switchWebAuth.setOnCheckedChangeListener { _, isChecked ->
-            AppPreferences.setWebAuthEnabled(this, isChecked)
+            SettingsRepository.update(this) { it.copy(webAuthEnabled = isChecked) }
             if (isChecked) showGeneratedPasswordIfAny()
-            sendSettingToService("web_auth_enabled", isChecked.toString())
         }
 
         binding.switchAudio.setOnCheckedChangeListener { _, isChecked ->
-            AppPreferences.setAudioEnabled(this, isChecked)
-            restartServer()
+            SettingsRepository.update(this) { it.copy(audioEnabled = isChecked) }
         }
 
         binding.switchStartOnBoot.setOnCheckedChangeListener { _, isChecked ->
@@ -345,8 +316,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         binding.switchRecordToGallery.setOnCheckedChangeListener { _, isChecked ->
-            AppPreferences.setRecordToGalleryEnabled(this, isChecked)
-            sendSettingToService("record_to_gallery_enabled", isChecked.toString())
+            SettingsRepository.update(this) { it.copy(recordToGalleryEnabled = isChecked) }
         }
 
         binding.editRecordSegmentMinutes.setOnFocusChangeListener { _, hasFocus ->
@@ -355,8 +325,7 @@ class MainActivity : AppCompatActivity() {
                 ?.coerceIn(AppPreferences.RECORD_SEGMENT_MINUTES_MIN, AppPreferences.RECORD_SEGMENT_MINUTES_MAX)
                 ?: AppPreferences.DEFAULT_RECORD_SEGMENT_MINUTES
             binding.editRecordSegmentMinutes.setText(minutes.toString())
-            AppPreferences.setRecordSegmentMinutes(this, minutes)
-            sendSettingToService("record_segment_minutes", minutes.toString())
+            SettingsRepository.update(this) { it.copy(recordSegmentMinutes = minutes) }
         }
 
         binding.editRecordStorageThresholdPercent.setOnFocusChangeListener { _, hasFocus ->
@@ -368,31 +337,30 @@ class MainActivity : AppCompatActivity() {
                 )
                 ?: AppPreferences.DEFAULT_RECORD_STORAGE_THRESHOLD_PERCENT
             binding.editRecordStorageThresholdPercent.setText(percent.toString())
-            AppPreferences.setRecordStorageThresholdPercent(this, percent)
-            sendSettingToService("record_storage_threshold_percent", percent.toString())
+            SettingsRepository.update(this) { it.copy(recordStorageThresholdPercent = percent) }
         }
     }
 
     /**
-     * Writes every tick to [AppPreferences] (cheap, matches [binding.sliderMotionSensitivity]'s
-     * existing per-tick write), but debounces the actual push to the running service --
-     * otherwise a drag would fire a startService() call dozens of times a second. The
-     * debounce is flushed immediately on release so the final value is never delayed.
+     * Debounces the push to [SettingsRepository] (and, transitively, to a running
+     * service's live camera zoom) -- otherwise a drag would call it dozens of times a
+     * second. The debounce is flushed immediately on release so the final value is never
+     * delayed.
      */
     private fun setupZoomSlider() {
         binding.sliderZoomLevel.addOnChangeListener { _, value, fromUser ->
             if (!fromUser) return@addOnChangeListener
-            AppPreferences.setZoomLevel(this, value)
-            zoomDebounceRunnable?.let { zoomDebounceHandler.removeCallbacks(it) }
-            val runnable = Runnable { sendSettingToService("zoom_level", value.toString()) }
-            zoomDebounceRunnable = runnable
-            zoomDebounceHandler.postDelayed(runnable, 120)
+            zoomDebounceJob?.cancel()
+            zoomDebounceJob = activityScope.launch {
+                delay(120)
+                SettingsRepository.update(this@MainActivity) { it.copy(zoomLevel = value) }
+            }
         }
         binding.sliderZoomLevel.addOnSliderTouchListener(object : Slider.OnSliderTouchListener {
             override fun onStartTrackingTouch(slider: Slider) {}
             override fun onStopTrackingTouch(slider: Slider) {
-                zoomDebounceRunnable?.let { zoomDebounceHandler.removeCallbacks(it) }
-                sendSettingToService("zoom_level", slider.value.toString())
+                zoomDebounceJob?.cancel()
+                SettingsRepository.update(this@MainActivity) { it.copy(zoomLevel = slider.value) }
             }
         })
     }
@@ -450,7 +418,7 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        restartServer()
+        ensureServiceStarted()
         updateServerStatus(true)
     }
 
@@ -459,49 +427,21 @@ class MainActivity : AppCompatActivity() {
         return powerManager.isIgnoringBatteryOptimizations(packageName)
     }
 
-    private fun restartServer() {
+    /**
+     * Makes sure the service process is actually running. No settings are carried on
+     * this intent -- [CctvServerService] loads them straight from [SettingsRepository]
+     * (the same data source every setting listener in this activity writes to directly),
+     * so a live service already has whatever the current values are.
+     */
+    private fun ensureServiceStarted() {
         if (!binding.switchServer.isChecked) return
 
-        val (width, height) = getSelectedResolution()
-        val intent = Intent(this, CctvServerService::class.java).apply {
-            putExtra("video_codec", binding.spinnerCodec.text.toString())
-            putExtra("force_software", binding.switchForceSoftware.isChecked)
-            putExtra("show_preview", binding.switchPreview.isChecked)
-            putExtra("width", width)
-            putExtra("height", height)
-            putExtra("auth_enabled", binding.switchAuth.isChecked)
-            putExtra("auth_username", binding.editUsername.text.toString())
-            putExtra("auth_password", binding.editPassword.text.toString())
-            putExtra("show_timestamp", binding.switchTimestamp.isChecked)
-            putExtra("timestamp_position", binding.spinnerOverlayPosition.text.toString())
-            putExtra("timestamp_size", binding.spinnerOverlaySize.text.toString())
-            putExtra("flashlight_enabled", binding.switchFlashlight.isChecked)
-            putExtra("night_mode_enabled", binding.switchNightMode.isChecked)
-            putExtra("vertical_flip_enabled", binding.switchVerticalFlip.isChecked)
-            putExtra("record_to_gallery_enabled", binding.switchRecordToGallery.isChecked)
-            putExtra("record_segment_minutes", AppPreferences.getRecordSegmentMinutes(this@MainActivity))
-            putExtra(
-                "record_storage_threshold_percent",
-                AppPreferences.getRecordStorageThresholdPercent(this@MainActivity)
-            )
-        }
-
+        val intent = Intent(this, CctvServerService::class.java)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             startForegroundService(intent)
         } else {
             startService(intent)
         }
-    }
-
-    /** Pushes a single setting to a running service without restarting the stream. */
-    private fun sendSettingToService(key: String, value: String) {
-        if (!binding.switchServer.isChecked) return
-        val intent = Intent(this, CctvServerService::class.java).apply {
-            action = "ACTION_SET_SETTING"
-            putExtra("setting_key", key)
-            putExtra("setting_value", value)
-        }
-        startService(intent)
     }
 
     private fun sendServiceAction(action: String) {
@@ -510,9 +450,6 @@ class MainActivity : AppCompatActivity() {
             startService(intent)
         }
     }
-
-    private fun getSelectedResolution(): Pair<Int, Int> =
-        parseResolution(binding.spinnerResolution.text.toString())
 
     companion object {
         private val DEFAULT_RESOLUTION = Pair(640, 480)
@@ -552,11 +489,9 @@ class MainActivity : AppCompatActivity() {
 
         // Set RTSP and Web URLs
         if (ipv4Address != null) {
-            val authEnabled = AppPreferences.getAuthEnabled(this)
-            val username = AppPreferences.getUsername(this)
-            val password = AppPreferences.getPassword(this)
-            if (authEnabled && username.isNotEmpty() && password.isNotEmpty()) {
-                binding.textRtspUrl.text = "rtsp://$username:$password@$ip:8554/stream"
+            val s = SettingsRepository.current
+            if (s.authEnabled && s.authUsername.isNotEmpty() && s.authPassword.isNotEmpty()) {
+                binding.textRtspUrl.text = "rtsp://${s.authUsername}:${s.authPassword}@$ip:8554/stream"
             } else {
                 binding.textRtspUrl.text = "rtsp://$ip:8554/stream"
             }
@@ -567,19 +502,16 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /** Saves the credential fields, refreshing the URLs and the stream only if they changed. */
+    /**
+     * Saves the credential fields and refreshes the displayed URLs. `SettingsRepository`'s
+     * data-class equality already makes this a no-op if neither field actually changed,
+     * so there's no need for a manual "did it change" check here anymore.
+     */
     private fun applyCredentialsIfChanged() {
         val username = binding.editUsername.text.toString()
         val password = binding.editPassword.text.toString()
-
-        val changed = username != AppPreferences.getUsername(this) ||
-            password != AppPreferences.getPassword(this)
-        if (!changed) return
-
-        AppPreferences.setUsername(this, username)
-        AppPreferences.setPassword(this, password)
+        SettingsRepository.update(this) { it.copy(authUsername = username, authPassword = password) }
         updateNetworkInfo()
-        restartServer()
     }
 
     /**
@@ -589,13 +521,20 @@ class MainActivity : AppCompatActivity() {
     private fun showGeneratedPasswordIfAny() {
         val generated = AppPreferences.seedCredentialsIfMissing(this) ?: return
 
-        binding.editUsername.setText(AppPreferences.getUsername(this))
+        // seedCredentialsIfMissing writes straight to AppPreferences (it runs before
+        // SettingsRepository is necessarily even loaded) -- pull the username it picked
+        // back through SettingsRepository.update so the shared repository doesn't go
+        // stale relative to what's actually persisted.
+        val username = AppPreferences.getUsername(this)
+        SettingsRepository.update(this) { it.copy(authUsername = username, authPassword = generated) }
+
+        binding.editUsername.setText(username)
         binding.editPassword.setText(generated)
 
         // Only claim the dashboard is protected when it actually is. The password is
         // seeded regardless of the toggle, so with it off the old wording told the user
         // they were covered while the dashboard stayed reachable by anyone on the network.
-        val message = if (AppPreferences.getWebAuthEnabled(this)) {
+        val message = if (SettingsRepository.current.webAuthEnabled) {
             getString(R.string.generated_password_message, generated)
         } else {
             getString(R.string.generated_password_message_unprotected, generated)
@@ -640,5 +579,10 @@ class MainActivity : AppCompatActivity() {
             }
         }
         return false
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        activityScope.cancel()
     }
 }

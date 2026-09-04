@@ -180,15 +180,6 @@
                         tools:ignore="LabelFor" />
                 </com.google.android.material.textfield.TextInputLayout>
 
-                <!-- Force Software Codec -->
-                <com.google.android.material.materialswitch.MaterialSwitch
-                    android:id="@+id/switch_force_software"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="12dp"
-                    android:text="@string/force_software_codec"
-                    android:textAppearance="@style/TextAppearance.Material3.BodyLarge" />
-
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 

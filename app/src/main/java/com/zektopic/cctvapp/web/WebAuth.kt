@@ -1,4 +1,4 @@
-package com.zektopic.cctvapp
+package com.zektopic.cctvapp.web
 
 /**
  * HTTP Basic authentication and request-origin checks for the on-device web server.

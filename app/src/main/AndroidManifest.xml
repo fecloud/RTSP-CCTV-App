@@ -46,7 +46,7 @@
             </intent-filter>
         </activity>
 
-        <service android:name=".CctvServerService"
+        <service android:name=".service.CctvServerService"
             android:exported="false"
             android:foregroundServiceType="camera|microphone" />
 

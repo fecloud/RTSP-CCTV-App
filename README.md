@@ -231,7 +231,6 @@ cross-origin `Origin` header are rejected with `403`.
 | `vertical_flip_enabled` | bool | Flip preview/stream/snapshot for an upside-down mount |
 | `zoom_level` | float 1.0–8.0 | Camera digital zoom factor |
 | `bitrate_kbps` | int 500–8000 | Video bitrate, applied live while streaming |
-| `force_software` | bool | Prefer the software encoder |
 | `show_preview` | bool | On-device preview overlay |
 | `audio_enabled` | bool | Include microphone audio in the stream |
 | `web_auth_enabled` | bool | Require authentication on port 8081 |

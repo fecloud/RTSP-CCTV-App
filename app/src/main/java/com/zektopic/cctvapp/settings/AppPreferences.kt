@@ -1,7 +1,10 @@
-package com.zektopic.cctvapp
+package com.zektopic.cctvapp.settings
 
 import android.content.Context
 import android.content.SharedPreferences
+import com.zektopic.cctvapp.camera.CameraResolutionUtil
+import com.zektopic.cctvapp.web.WebAuth
+import androidx.core.content.edit
 
 /**
  * Centralized SharedPreferences helper for persisting user settings
@@ -14,7 +17,6 @@ object AppPreferences {
     private const val KEY_VIDEO_CODEC = "video_codec"
     private const val KEY_VIDEO_WIDTH = "video_width"
     private const val KEY_VIDEO_HEIGHT = "video_height"
-    private const val KEY_FORCE_SOFTWARE = "force_software"
     private const val KEY_SHOW_PREVIEW = "show_preview"
 
     private fun prefs(context: Context): SharedPreferences {
@@ -26,7 +28,7 @@ object AppPreferences {
         prefs(context).getString(KEY_VIDEO_CODEC, "H264") ?: "H264"
 
     fun setVideoCodec(context: Context, codec: String) {
-        prefs(context).edit().putString(KEY_VIDEO_CODEC, codec).apply()
+        prefs(context).edit { putString(KEY_VIDEO_CODEC, codec) }
     }
 
     // --- Resolution ---
@@ -37,18 +39,10 @@ object AppPreferences {
         prefs(context).getInt(KEY_VIDEO_HEIGHT, 1080)
 
     fun setResolution(context: Context, width: Int, height: Int) {
-        prefs(context).edit()
-            .putInt(KEY_VIDEO_WIDTH, width)
-            .putInt(KEY_VIDEO_HEIGHT, height)
-            .apply()
-    }
-
-    // --- Force Software Codec ---
-    fun getForceSoftware(context: Context): Boolean =
-        prefs(context).getBoolean(KEY_FORCE_SOFTWARE, false)
-
-    fun setForceSoftware(context: Context, force: Boolean) {
-        prefs(context).edit().putBoolean(KEY_FORCE_SOFTWARE, force).apply()
+        prefs(context).edit {
+            putInt(KEY_VIDEO_WIDTH, width)
+                .putInt(KEY_VIDEO_HEIGHT, height)
+        }
     }
 
     // --- Show Preview ---
@@ -56,7 +50,7 @@ object AppPreferences {
         prefs(context).getBoolean(KEY_SHOW_PREVIEW, false)
 
     fun setShowPreview(context: Context, show: Boolean) {
-        prefs(context).edit().putBoolean(KEY_SHOW_PREVIEW, show).apply()
+        prefs(context).edit { putBoolean(KEY_SHOW_PREVIEW, show) }
     }
 
     // --- RTSP Authentication ---
@@ -68,21 +62,21 @@ object AppPreferences {
         prefs(context).getBoolean(KEY_AUTH_ENABLED, false)
 
     fun setAuthEnabled(context: Context, enabled: Boolean) {
-        prefs(context).edit().putBoolean(KEY_AUTH_ENABLED, enabled).apply()
+        prefs(context).edit { putBoolean(KEY_AUTH_ENABLED, enabled) }
     }
 
     fun getUsername(context: Context): String =
         prefs(context).getString(KEY_AUTH_USERNAME, "") ?: ""
 
     fun setUsername(context: Context, username: String) {
-        prefs(context).edit().putString(KEY_AUTH_USERNAME, username).apply()
+        prefs(context).edit { putString(KEY_AUTH_USERNAME, username) }
     }
 
     fun getPassword(context: Context): String =
         prefs(context).getString(KEY_AUTH_PASSWORD, "") ?: ""
 
     fun setPassword(context: Context, password: String) {
-        prefs(context).edit().putString(KEY_AUTH_PASSWORD, password).apply()
+        prefs(context).edit { putString(KEY_AUTH_PASSWORD, password) }
     }
 
     // --- Timestamp Overlay ---
@@ -95,14 +89,14 @@ object AppPreferences {
         prefs(context).getBoolean(KEY_SHOW_TIMESTAMP, true)
 
     fun setShowTimestamp(context: Context, show: Boolean) {
-        prefs(context).edit().putBoolean(KEY_SHOW_TIMESTAMP, show).apply()
+        prefs(context).edit { putBoolean(KEY_SHOW_TIMESTAMP, show) }
     }
 
     fun getTimestampPosition(context: Context): String =
         prefs(context).getString(KEY_TIMESTAMP_POSITION, "Top Left") ?: "Top Left"
 
     fun setTimestampPosition(context: Context, position: String) {
-        prefs(context).edit().putString(KEY_TIMESTAMP_POSITION, position).apply()
+        prefs(context).edit { putString(KEY_TIMESTAMP_POSITION, position) }
     }
 
     private const val KEY_TIMESTAMP_SIZE = "timestamp_size"
@@ -111,7 +105,7 @@ object AppPreferences {
         prefs(context).getString(KEY_TIMESTAMP_SIZE, "Large") ?: "Large"
 
     fun setTimestampSize(context: Context, size: String) {
-        prefs(context).edit().putString(KEY_TIMESTAMP_SIZE, size).apply()
+        prefs(context).edit { putString(KEY_TIMESTAMP_SIZE, size) }
     }
 
     // --- Flashlight & Night Mode ---
@@ -122,14 +116,14 @@ object AppPreferences {
         prefs(context).getBoolean(KEY_FLASHLIGHT_ENABLED, false)
 
     fun setFlashlightEnabled(context: Context, enabled: Boolean) {
-        prefs(context).edit().putBoolean(KEY_FLASHLIGHT_ENABLED, enabled).apply()
+        prefs(context).edit { putBoolean(KEY_FLASHLIGHT_ENABLED, enabled) }
     }
 
     fun getNightModeEnabled(context: Context): Boolean =
         prefs(context).getBoolean(KEY_NIGHT_MODE_ENABLED, false)
 
     fun setNightModeEnabled(context: Context, enabled: Boolean) {
-        prefs(context).edit().putBoolean(KEY_NIGHT_MODE_ENABLED, enabled).apply()
+        prefs(context).edit { putBoolean(KEY_NIGHT_MODE_ENABLED, enabled) }
     }
 
     // --- Vertical Flip ---
@@ -142,25 +136,28 @@ object AppPreferences {
         prefs(context).getBoolean(KEY_VERTICAL_FLIP_ENABLED, false)
 
     fun setVerticalFlipEnabled(context: Context, enabled: Boolean) {
-        prefs(context).edit().putBoolean(KEY_VERTICAL_FLIP_ENABLED, enabled).apply()
+        prefs(context).edit { putBoolean(KEY_VERTICAL_FLIP_ENABLED, enabled) }
     }
 
     // --- Zoom ---
     private const val KEY_ZOOM_LEVEL = "zoom_level"
 
-    // Generic, hardware-agnostic bounds for the stored zoom level. The real Camera2 zoom
-    // range varies per device and is only known once the camera session is open
-    // (Camera2Base#getZoomRange()) -- CctvServerService clamps again against that real
-    // range before calling setZoom().
-    const val ZOOM_MIN = 1.0f
-    const val ZOOM_MAX = 8.0f
     const val DEFAULT_ZOOM_LEVEL = 1.0f
 
-    fun getZoomLevel(context: Context): Float =
-        prefs(context).getFloat(KEY_ZOOM_LEVEL, DEFAULT_ZOOM_LEVEL).coerceIn(ZOOM_MIN, ZOOM_MAX)
+    // The real Camera2 zoom range varies per device -- read straight from
+    // CameraCharacteristics via CameraResolutionUtil.getZoomRange() rather than a
+    // hardcoded constant, so a stored value can never be clamped tighter (or looser)
+    // than what the hardware actually supports. CctvServerService clamps again against
+    // the live camera session's range before calling setZoom(), which can differ
+    // slightly once a session is actually open.
+    fun getZoomLevel(context: Context): Float {
+        val (min, max) = CameraResolutionUtil.getZoomRange(context)
+        return prefs(context).getFloat(KEY_ZOOM_LEVEL, DEFAULT_ZOOM_LEVEL).coerceIn(min, max)
+    }
 
     fun setZoomLevel(context: Context, zoom: Float) {
-        prefs(context).edit().putFloat(KEY_ZOOM_LEVEL, zoom.coerceIn(ZOOM_MIN, ZOOM_MAX)).apply()
+        val (min, max) = CameraResolutionUtil.getZoomRange(context)
+        prefs(context).edit { putFloat(KEY_ZOOM_LEVEL, zoom.coerceIn(min, max)) }
     }
 
     // --- Bitrate ---
@@ -174,9 +171,9 @@ object AppPreferences {
         prefs(context).getInt(KEY_BITRATE_KBPS, DEFAULT_BITRATE_KBPS).coerceIn(BITRATE_MIN_KBPS, BITRATE_MAX_KBPS)
 
     fun setBitrateKbps(context: Context, kbps: Int) {
-        prefs(context).edit()
-            .putInt(KEY_BITRATE_KBPS, kbps.coerceIn(BITRATE_MIN_KBPS, BITRATE_MAX_KBPS))
-            .apply()
+        prefs(context).edit {
+            putInt(KEY_BITRATE_KBPS, kbps.coerceIn(BITRATE_MIN_KBPS, BITRATE_MAX_KBPS))
+        }
     }
 
     // --- Web dashboard security ---
@@ -194,7 +191,7 @@ object AppPreferences {
         prefs(context).getBoolean(KEY_WEB_AUTH_ENABLED, false)
 
     fun setWebAuthEnabled(context: Context, enabled: Boolean) {
-        prefs(context).edit().putBoolean(KEY_WEB_AUTH_ENABLED, enabled).apply()
+        prefs(context).edit { putBoolean(KEY_WEB_AUTH_ENABLED, enabled) }
     }
 
     /**
@@ -207,16 +204,16 @@ object AppPreferences {
         val preferences = prefs(context)
         if (preferences.getBoolean(KEY_CREDENTIALS_SEEDED, false)) return null
         if (getUsername(context).isNotEmpty() && getPassword(context).isNotEmpty()) {
-            preferences.edit().putBoolean(KEY_CREDENTIALS_SEEDED, true).apply()
+            preferences.edit { putBoolean(KEY_CREDENTIALS_SEEDED, true) }
             return null
         }
 
         val password = WebAuth.generatePassword(16)
-        preferences.edit()
-            .putString(KEY_AUTH_USERNAME, "admin")
-            .putString(KEY_AUTH_PASSWORD, password)
-            .putBoolean(KEY_CREDENTIALS_SEEDED, true)
-            .apply()
+        preferences.edit {
+            putString(KEY_AUTH_USERNAME, "admin")
+                .putString(KEY_AUTH_PASSWORD, password)
+                .putBoolean(KEY_CREDENTIALS_SEEDED, true)
+        }
         return password
     }
 
@@ -231,7 +228,7 @@ object AppPreferences {
         prefs(context).getBoolean(KEY_AUDIO_ENABLED, false)
 
     fun setAudioEnabled(context: Context, enabled: Boolean) {
-        prefs(context).edit().putBoolean(KEY_AUDIO_ENABLED, enabled).apply()
+        prefs(context).edit { putBoolean(KEY_AUDIO_ENABLED, enabled) }
     }
 
     // --- Startup behaviour ---
@@ -243,7 +240,7 @@ object AppPreferences {
         prefs(context).getBoolean(KEY_START_ON_BOOT, false)
 
     fun setStartOnBoot(context: Context, enabled: Boolean) {
-        prefs(context).edit().putBoolean(KEY_START_ON_BOOT, enabled).apply()
+        prefs(context).edit { putBoolean(KEY_START_ON_BOOT, enabled) }
     }
 
     /** Off by default: opening the app should not immediately begin streaming. */
@@ -251,7 +248,7 @@ object AppPreferences {
         prefs(context).getBoolean(KEY_AUTO_START_ON_LAUNCH, false)
 
     fun setAutoStartOnLaunch(context: Context, enabled: Boolean) {
-        prefs(context).edit().putBoolean(KEY_AUTO_START_ON_LAUNCH, enabled).apply()
+        prefs(context).edit { putBoolean(KEY_AUTO_START_ON_LAUNCH, enabled) }
     }
 
     // --- Record to Gallery ---
@@ -278,7 +275,7 @@ object AppPreferences {
         prefs(context).getBoolean(KEY_RECORD_TO_GALLERY_ENABLED, false)
 
     fun setRecordToGalleryEnabled(context: Context, enabled: Boolean) {
-        prefs(context).edit().putBoolean(KEY_RECORD_TO_GALLERY_ENABLED, enabled).apply()
+        prefs(context).edit { putBoolean(KEY_RECORD_TO_GALLERY_ENABLED, enabled) }
     }
 
     fun getRecordSegmentMinutes(context: Context): Int =
@@ -286,9 +283,12 @@ object AppPreferences {
             .coerceIn(RECORD_SEGMENT_MINUTES_MIN, RECORD_SEGMENT_MINUTES_MAX)
 
     fun setRecordSegmentMinutes(context: Context, minutes: Int) {
-        prefs(context).edit()
-            .putInt(KEY_RECORD_SEGMENT_MINUTES, minutes.coerceIn(RECORD_SEGMENT_MINUTES_MIN, RECORD_SEGMENT_MINUTES_MAX))
-            .apply()
+        prefs(context).edit {
+            putInt(
+                KEY_RECORD_SEGMENT_MINUTES,
+                minutes.coerceIn(RECORD_SEGMENT_MINUTES_MIN, RECORD_SEGMENT_MINUTES_MAX)
+            )
+        }
     }
 
     fun getRecordStorageThresholdPercent(context: Context): Int =
@@ -296,11 +296,14 @@ object AppPreferences {
             .coerceIn(RECORD_STORAGE_THRESHOLD_PERCENT_MIN, RECORD_STORAGE_THRESHOLD_PERCENT_MAX)
 
     fun setRecordStorageThresholdPercent(context: Context, percent: Int) {
-        prefs(context).edit()
-            .putInt(
+        prefs(context).edit {
+            putInt(
                 KEY_RECORD_STORAGE_THRESHOLD_PERCENT,
-                percent.coerceIn(RECORD_STORAGE_THRESHOLD_PERCENT_MIN, RECORD_STORAGE_THRESHOLD_PERCENT_MAX)
+                percent.coerceIn(
+                    RECORD_STORAGE_THRESHOLD_PERCENT_MIN,
+                    RECORD_STORAGE_THRESHOLD_PERCENT_MAX
+                )
             )
-            .apply()
+        }
     }
 }

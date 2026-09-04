@@ -2,15 +2,16 @@ package com.zektopic.cctvapp
 
 import android.Manifest
 import android.app.NotificationManager
-import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.util.Log
-import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
+import com.zektopic.cctvapp.service.CctvServerService
+import com.zektopic.cctvapp.service.ServiceNotificationUtil
+import com.zektopic.cctvapp.settings.AppPreferences
 
 /**
  * Restarts the camera server after a reboot, when the user has asked for that.
@@ -24,8 +25,6 @@ class BootReceiver : BroadcastReceiver() {
 
     companion object {
         private const val TAG = "BootReceiver"
-        private const val RESUME_NOTIFICATION_ID = 2
-        private const val CHANNEL_ID = "CctvServerChannel"
     }
 
     override fun onReceive(context: Context, intent: Intent) {
@@ -45,22 +44,10 @@ class BootReceiver : BroadcastReceiver() {
             return
         }
 
-        val serviceIntent = Intent(context, CctvServerService::class.java).apply {
-            putExtra("video_codec", AppPreferences.getVideoCodec(context))
-            putExtra("width", AppPreferences.getVideoWidth(context))
-            putExtra("height", AppPreferences.getVideoHeight(context))
-            putExtra("force_software", AppPreferences.getForceSoftware(context))
-            putExtra("show_preview", AppPreferences.getShowPreview(context))
-            putExtra("auth_enabled", AppPreferences.getAuthEnabled(context))
-            putExtra("auth_username", AppPreferences.getUsername(context))
-            putExtra("auth_password", AppPreferences.getPassword(context))
-            putExtra("show_timestamp", AppPreferences.getShowTimestamp(context))
-            putExtra("timestamp_position", AppPreferences.getTimestampPosition(context))
-            putExtra("timestamp_size", AppPreferences.getTimestampSize(context))
-            putExtra("flashlight_enabled", AppPreferences.getFlashlightEnabled(context))
-            putExtra("night_mode_enabled", AppPreferences.getNightModeEnabled(context))
-            putExtra("audio_enabled", AppPreferences.getAudioEnabled(context))
-        }
+        // No settings extras needed: CctvServerService.onCreate() loads them itself via
+        // SettingsRepository.ensureLoaded(context), the same shared data source
+        // MainActivity and WebServer's dashboard write to directly.
+        val serviceIntent = Intent(context, CctvServerService::class.java)
 
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -87,33 +74,12 @@ class BootReceiver : BroadcastReceiver() {
             return
         }
 
-        val contentIntent = PendingIntent.getActivity(
-            context,
-            0,
-            Intent(context, MainActivity::class.java),
-            PendingIntent.FLAG_IMMUTABLE
-        )
-
-        val notification = NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_stat_cctv)
-            .setContentTitle(context.getString(R.string.boot_resume_title))
-            .setContentText(context.getString(R.string.boot_resume_text))
-            .setContentIntent(contentIntent)
-            .setAutoCancel(true)
-            .build()
+        val notification = ServiceNotificationUtil.buildResumeNotification(context)
 
         try {
+            ServiceNotificationUtil.createNotificationChannel(context)
             val manager = context.getSystemService(NotificationManager::class.java)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                manager.createNotificationChannel(
-                    android.app.NotificationChannel(
-                        CHANNEL_ID,
-                        context.getString(R.string.notification_channel_name),
-                        NotificationManager.IMPORTANCE_DEFAULT
-                    )
-                )
-            }
-            manager.notify(RESUME_NOTIFICATION_ID, notification)
+            manager.notify(ServiceNotificationUtil.RESUME_NOTIFICATION_ID, notification)
         } catch (e: Exception) {
             Log.w(TAG, "Could not post resume notification", e)
         }
