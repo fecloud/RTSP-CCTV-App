@@ -228,6 +228,7 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
 
     override fun onCreate() {
         super.onCreate()
+        android.util.Log.w("CctvServerService", "onCreate: pid=${android.os.Process.myPid()}")
         createNotificationChannel()
 
         // Load saved settings as defaults
