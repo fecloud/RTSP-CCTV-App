@@ -19,10 +19,11 @@ class ResolutionParsingTest {
     }
 
     @Test
-    fun `max maps to the sentinel the service resolves`() {
-        assertEquals(MainActivity.MAX_RESOLUTION, MainActivity.parseResolution("Max"))
-        assertEquals(MainActivity.MAX_RESOLUTION, MainActivity.parseResolution("max"))
-        assertEquals(MainActivity.MAX_RESOLUTION, MainActivity.parseResolution("  MAX  "))
+    fun `Max is no longer a recognized sentinel and falls back`() {
+        val fallback = Pair(640, 480)
+        assertEquals(fallback, MainActivity.parseResolution("Max"))
+        assertEquals(fallback, MainActivity.parseResolution("max"))
+        assertEquals(fallback, MainActivity.parseResolution("  MAX  "))
     }
 
     @Test

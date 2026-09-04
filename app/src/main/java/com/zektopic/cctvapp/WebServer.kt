@@ -25,6 +25,8 @@ class WebServer(
     private val getActiveCodec: () -> String,
     private val onResolutionUpdate: (Int, Int) -> Unit,
     private val getCurrentResolution: () -> String,
+    /** "WIDTHxHEIGHT" strings the camera actually supports, for populating the resolution picker. */
+    private val getAvailableResolutions: () -> List<String> = { emptyList() },
     private val getAuthEnabled: () -> Boolean,
     private val getUsername: () -> String,
     private val getPassword: () -> String,
@@ -172,6 +174,7 @@ class WebServer(
             val streaming = isStreaming()
             val codec = getCurrentCodec()
             val resolution = getCurrentResolution()
+            val resolutionOptions = getAvailableResolutions().joinToString(",") { "\"$it\"" }
             val authEnabled = getAuthEnabled()
             val username = getUsername()
             val rtspUrl = buildRtspUrl()
@@ -180,6 +183,7 @@ class WebServer(
                 "codec":"$codec",
                 "activeCodec":"${getActiveCodec()}",
                 "resolution":"$resolution",
+                "resolutionOptions":[$resolutionOptions],
                 "authEnabled":$authEnabled,
                 "username":"${escapeJson(username)}",
                 "rtspUrl":"${escapeJson(rtspUrl)}",
@@ -747,12 +751,7 @@ class WebServer(
             <div class="setting-row">
                 <span class="setting-label">Resolution</span>
                 <div class="select-wrap">
-                    <select id="resSelect" onchange="changeResolution(this.value)">
-                        <option value="640x480">480p</option>
-                        <option value="1280x720">720p</option>
-                        <option value="1920x1080">1080p</option>
-                        <option value="0x0">Max</option>
-                    </select>
+                    <select id="resSelect" onchange="changeResolution(this.value)"></select>
                 </div>
             </div>
             <div class="setting-row">
@@ -974,6 +973,24 @@ class WebServer(
             newImg.src = '/shot.jpg?t=' + Date.now();
         }, 500);
         
+        // --- Resolution options ---
+        // Populated once from the camera's real supported sizes (falls back to a
+        // small static list if the device somehow reports none), then left alone --
+        // fetchStatus() polls every 3s and rebuilding the <option> list every time
+        // would fight an open dropdown.
+        function populateResolutionOptions(options) {
+            const select = document.getElementById('resSelect');
+            if (select.dataset.populated) return;
+            const sizes = (options && options.length > 0) ? options : ['640x480', '1280x720', '1920x1080'];
+            sizes.forEach(function(res) {
+                const opt = document.createElement('option');
+                opt.value = res;
+                opt.textContent = res;
+                select.appendChild(opt);
+            });
+            select.dataset.populated = '1';
+        }
+
         // --- Status polling ---
         let initialLoad = true;
         function fetchStatus() {
@@ -1009,6 +1026,7 @@ class WebServer(
                     
                     // Sync dropdowns
                     document.getElementById('codecSelect').value = data.codec;
+                    populateResolutionOptions(data.resolutionOptions);
                     document.getElementById('resSelect').value = data.resolution;
                     
                     // Sync toggles
@@ -1080,7 +1098,7 @@ class WebServer(
         function changeResolution(v) {
             const [w, h] = v.split('x');
             fetch('/action/set-resolution?w=' + w + '&h=' + h, POST)
-                .then(() => { showToast(v === '0x0' ? 'Resolution: Max' : 'Resolution: ' + v); fetchStatus(); });
+                .then(() => { showToast('Resolution: ' + v); fetchStatus(); });
         }
         
         function setSetting(key, value) {

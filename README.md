@@ -214,7 +214,7 @@ cross-origin `Origin` header are rejected with `403`.
 | `POST /action/toggle-stream` | — |
 | `POST /action/switch-camera` | — |
 | `POST /action/set-codec` | `codec=H264\|H265\|AV1` |
-| `POST /action/set-resolution` | `w=<int>&h=<int>` (`0x0` = camera maximum) |
+| `POST /action/set-resolution` | `w=<int>&h=<int>` |
 | `POST /action/set-setting` | `key=<key>&value=<value>` |
 | `POST /action/set-auth` | `enabled=<bool>&username=<s>&password=<s>` |
 

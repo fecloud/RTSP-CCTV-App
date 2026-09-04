@@ -59,7 +59,9 @@ class MainActivity : AppCompatActivity() {
     private val zoomDebounceHandler = Handler(Looper.getMainLooper())
     private var zoomDebounceRunnable: Runnable? = null
 
-    private val resolutions = arrayOf("640x480", "1280x720", "1920x1080", "Max")
+    // Populated in onCreate() from the camera's actual supported sizes; this is only
+    // the fallback used if that query comes back empty.
+    private var resolutions: List<String> = DEFAULT_RESOLUTIONS
     private val codecs = arrayOf("H264", "H265", "AV1")
     private val overlayPositions = arrayOf("Top Left", "Top Right", "Bottom Left", "Bottom Right")
     private val overlaySizes = arrayOf("Small", "Medium", "Large")
@@ -70,6 +72,10 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
+
+        resolutions = CameraResolutionUtil.getSupportedResolutions(this)
+            .map { "${it.first}x${it.second}" }
+            .ifEmpty { DEFAULT_RESOLUTIONS }
 
         setupViews()
         requestPermissionsIfNeeded()
@@ -117,7 +123,7 @@ class MainActivity : AppCompatActivity() {
         // Load saved resolution
         val savedWidth = AppPreferences.getVideoWidth(this)
         val savedHeight = AppPreferences.getVideoHeight(this)
-        val savedResolution = if (savedWidth == 0 && savedHeight == 0) "Max" else "${savedWidth}x${savedHeight}"
+        val savedResolution = "${savedWidth}x${savedHeight}"
         (binding.spinnerResolution as? AutoCompleteTextView)?.setText(
             if (savedResolution in resolutions) savedResolution else resolutions.first(), false
         )
@@ -509,12 +515,13 @@ class MainActivity : AppCompatActivity() {
         parseResolution(binding.spinnerResolution.text.toString())
 
     companion object {
-        /** Sentinel meaning "ask the camera for its maximum"; resolved in the service. */
-        val MAX_RESOLUTION = Pair(0, 0)
         private val DEFAULT_RESOLUTION = Pair(640, 480)
 
+        /** Used only if querying the camera's supported sizes comes back empty. */
+        private val DEFAULT_RESOLUTIONS = listOf("640x480", "1280x720", "1920x1080")
+
         /**
-         * Parses a "WIDTHxHEIGHT" label, or "Max".
+         * Parses a "WIDTHxHEIGHT" label.
          *
          * The picker is an AutoCompleteTextView, so its contents are whatever the user
          * typed -- `parts[0].toInt()` on that threw NumberFormatException and took the
@@ -522,7 +529,6 @@ class MainActivity : AppCompatActivity() {
          */
         fun parseResolution(value: String): Pair<Int, Int> {
             val trimmed = value.trim()
-            if (trimmed.equals("Max", ignoreCase = true)) return MAX_RESOLUTION
 
             val parts = trimmed.split("x", "X")
             if (parts.size != 2) return DEFAULT_RESOLUTION
