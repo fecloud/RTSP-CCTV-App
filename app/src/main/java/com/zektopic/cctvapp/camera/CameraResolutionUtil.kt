@@ -5,6 +5,7 @@ import android.graphics.SurfaceTexture
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
 import android.os.Build
+import android.util.Log
 
 /**
  * Queries the back camera's supported video sizes and zoom range via Camera2 -- shared
@@ -57,10 +58,10 @@ object CameraResolutionUtil {
 
             if (chosen.isEmpty()) return FALLBACK
 
-            android.util.Log.d(TAG, "Supported resolutions: " + chosen.joinToString { "${it.first}x${it.second}" })
+            Log.d(TAG, "Supported resolutions: " + chosen.joinToString { "${it.first}x${it.second}" })
             chosen
         } catch (e: Exception) {
-            android.util.Log.e(TAG, "Failed to query camera resolutions", e)
+            Log.e(TAG, "Failed to query camera resolutions", e)
             FALLBACK
         }
     }
@@ -102,10 +103,10 @@ object CameraResolutionUtil {
                 kotlin.math.ceil(rawMax / ZOOM_STEP) * ZOOM_STEP,
             )
 
-            android.util.Log.d(TAG, "Zoom range: ${resolved.first}x-${resolved.second}x (raw $rawMin-$rawMax)")
+            Log.d(TAG, "Zoom range: ${resolved.first}x-${resolved.second}x (raw $rawMin-$rawMax)")
             resolved
         } catch (e: Exception) {
-            android.util.Log.e(TAG, "Failed to query camera zoom range", e)
+            Log.e(TAG, "Failed to query camera zoom range", e)
             FALLBACK_ZOOM_RANGE
         }
     }
