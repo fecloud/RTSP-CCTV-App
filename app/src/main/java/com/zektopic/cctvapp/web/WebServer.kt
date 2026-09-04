@@ -1,6 +1,7 @@
 package com.zektopic.cctvapp.web
 
 import android.content.Context
+import android.os.SystemClock
 import android.util.Log
 import com.zektopic.cctvapp.camera.CameraResolutionUtil
 import com.zektopic.cctvapp.device.DeviceStatsUtil
@@ -41,6 +42,9 @@ class WebServer(
     /** Same data source [com.zektopic.cctvapp.MainActivity] and the service read/write. */
     private val settings: ServiceSettings get() = SettingsRepository.current
     private val settingUpdateHandler by lazy { SettingUpdateHandler(context) }
+
+    /** Set at construction, i.e. service start -- backs the `/status` `uptimeMillis` field. */
+    private val startElapsedRealtimeMs = SystemClock.elapsedRealtime()
 
     override fun serve(session: IHTTPSession): Response {
         return try {
@@ -172,6 +176,8 @@ class WebServer(
                 "showPreview":${s.showPreview},
                 "batteryLevel":${DeviceStatsUtil.getBatteryLevel(context)},
                 "wifiStrength":${DeviceStatsUtil.getWifiStrength(context)},
+                "cpuTempCelsius":${DeviceStatsUtil.getCpuTemperatureCelsius()?.let { "%.1f".format(it) } ?: "null"},
+                "uptimeMillis":${SystemClock.elapsedRealtime() - startElapsedRealtimeMs},
                 "webAuthEnabled":${s.webAuthEnabled},
                 "recordToGalleryEnabled":${s.recordToGalleryEnabled},
                 "recordSegmentMinutes":${s.recordSegmentMinutes},
