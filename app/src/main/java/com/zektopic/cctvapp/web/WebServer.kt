@@ -177,6 +177,7 @@ class WebServer(
                 "batteryLevel":${DeviceStatsUtil.getBatteryLevel(context)},
                 "wifiStrength":${DeviceStatsUtil.getWifiStrength(context)},
                 "cpuTempCelsius":${DeviceStatsUtil.getCpuTemperatureCelsius()?.let { "%.1f".format(it) } ?: "null"},
+                "batteryTempCelsius":${DeviceStatsUtil.getBatteryTemperatureCelsius(context)?.let { "%.1f".format(it) } ?: "null"},
                 "uptimeMillis":${SystemClock.elapsedRealtime() - startElapsedRealtimeMs},
                 "webAuthEnabled":${s.webAuthEnabled},
                 "recordToGalleryEnabled":${s.recordToGalleryEnabled},
