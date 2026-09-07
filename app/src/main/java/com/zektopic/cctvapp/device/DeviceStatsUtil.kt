@@ -29,12 +29,17 @@ object DeviceStatsUtil {
 
     /**
      * Whether the device is currently charging (including topped-up-but-still-plugged-in),
-     * or null if unavailable. Same direct-`BatteryManager` approach as [getBatteryLevel],
-     * rather than a sticky-broadcast registration, since this is polled just as often.
+     * or null if unavailable.
+     *
+     * `BatteryManager.BATTERY_PROPERTY_STATUS` (the direct-read approach used by
+     * [getBatteryLevel]) isn't actually populated on every device -- it returned
+     * unsupported on a real API 23 test device -- so this reads `EXTRA_STATUS` off the
+     * `ACTION_BATTERY_CHANGED` sticky broadcast instead, same as
+     * [getBatteryTemperatureCelsius], which has been reliable since API 1.
      */
     fun isCharging(context: Context): Boolean? {
-        val batteryManager = context.getSystemService(Context.BATTERY_SERVICE) as? BatteryManager ?: return null
-        return when (batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_STATUS)) {
+        val stickyIntent = context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED)) ?: return null
+        return when (stickyIntent.getIntExtra(BatteryManager.EXTRA_STATUS, -1)) {
             BatteryManager.BATTERY_STATUS_CHARGING, BatteryManager.BATTERY_STATUS_FULL -> true
             BatteryManager.BATTERY_STATUS_DISCHARGING, BatteryManager.BATTERY_STATUS_NOT_CHARGING -> false
             else -> null
