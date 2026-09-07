@@ -10,7 +10,7 @@ import android.os.Environment
 import android.os.ParcelFileDescriptor
 import android.os.StatFs
 import android.provider.MediaStore
-import android.util.Log
+import com.zektopic.cctvapp.log.AppLog as Log
 import androidx.core.content.ContextCompat
 import com.pedro.library.base.recording.RecordController
 import com.pedro.rtspserver.RtspServerCamera2

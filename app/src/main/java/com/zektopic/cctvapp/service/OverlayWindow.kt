@@ -3,7 +3,7 @@ package com.zektopic.cctvapp.service
 import android.content.Context
 import android.graphics.PixelFormat
 import android.os.Build
-import android.util.Log
+import com.zektopic.cctvapp.log.AppLog as Log
 import android.view.Gravity
 import android.view.SurfaceHolder
 import android.view.WindowManager

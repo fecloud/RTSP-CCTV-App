@@ -12,7 +12,7 @@ import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.os.Build
 import android.os.IBinder
-import android.util.Log
+import com.zektopic.cctvapp.log.AppLog as Log
 import android.view.SurfaceHolder
 import com.pedro.common.ConnectChecker
 import com.pedro.common.VideoCodec

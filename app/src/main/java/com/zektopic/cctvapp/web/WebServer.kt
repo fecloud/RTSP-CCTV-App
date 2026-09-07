@@ -2,7 +2,7 @@ package com.zektopic.cctvapp.web
 
 import android.content.Context
 import android.os.SystemClock
-import android.util.Log
+import com.zektopic.cctvapp.log.AppLog as Log
 import com.zektopic.cctvapp.camera.CameraResolutionUtil
 import com.zektopic.cctvapp.device.DeviceStatsUtil
 import com.zektopic.cctvapp.service.GalleryRecordingManager

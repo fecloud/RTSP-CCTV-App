@@ -7,7 +7,7 @@ import android.net.ConnectivityManager
 import android.net.wifi.WifiManager
 import android.os.BatteryManager
 import android.os.StatFs
-import android.util.Log
+import com.zektopic.cctvapp.log.AppLog as Log
 import java.io.File
 import java.net.Inet4Address
 

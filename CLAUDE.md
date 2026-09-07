@@ -40,12 +40,13 @@ to be one flat package, but it grew past the point that stayed readable):
 
 | Package | Files | Responsibility |
 |---|---|---|
-| *(root)* | `MainActivity.kt`, `BootReceiver.kt` | App entry points — the two components Android launches by class name |
+| *(root)* | `MainActivity.kt`, `BootReceiver.kt`, `CctvApplication.kt` | App entry points — the components Android launches by class name, plus process-wide init (Bugly, `AppLog`) in `CctvApplication.onCreate` |
 | `.service` | `CctvServerService.kt`, `GalleryRecordingManager.kt`, `OverlayWindow.kt`, `ServiceNotificationUtil.kt` | The foreground service: camera/encoder/stream lifecycle, gallery recording, the overlay window, the notification |
 | `.settings` | `AppPreferences.kt`, `ServiceSettings.kt`, `SettingsRepository.kt`, `SettingEffects.kt`, `SettingUpdateHandler.kt` | Settings persistence and the shared in-memory data source (see "Settings: one shared data source" below) |
 | `.web` | `WebServer.kt`, `WebAuth.kt` | NanoHTTPD dashboard server + HTTP Basic auth |
 | `.camera` | `CameraResolutionUtil.kt` | Camera2 supported-resolution querying, shared by the service, `GalleryRecordingManager`, and `MainActivity` |
 | `.device` | `DeviceStatsUtil.kt`, `ThermalZoneUtil.kt` | Battery/CPU/Wi-Fi telemetry surfaced in `/status` and the timestamp overlay |
+| `.log` | `AppLog.kt`, `LogLineFormatter.kt` | `android.util.Log`-compatible logger (import-aliased in at every call site) that also persists every line to a rotating file under app-specific external storage (falling back to internal storage if unavailable), since logcat isn't retrievable after the fact from a background service on someone else's phone |
 
 `CctvServerService` no longer owns the whole pipeline itself — it composes the classes in
 `.service` and reacts to `.settings`'s shared repository (see below). `MainActivity` is a

@@ -5,7 +5,7 @@ import android.graphics.SurfaceTexture
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
 import android.os.Build
-import android.util.Log
+import com.zektopic.cctvapp.log.AppLog as Log
 
 /**
  * Queries the back camera's supported video sizes and zoom range via Camera2 -- shared
