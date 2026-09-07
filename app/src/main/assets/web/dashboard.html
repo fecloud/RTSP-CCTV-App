@@ -374,8 +374,8 @@
                     <svg viewBox="0 0 24 24" style="width:16px; height:16px; fill:currentColor;"><path d="M15 13V5c0-1.66-1.34-3-3-3S9 3.34 9 5v8c-1.21.91-2 2.37-2 4 0 2.76 2.24 5 5 5s5-2.24 5-5c0-1.63-.79-3.09-2-4zm-4-8c0-.55.45-1 1-1s1 .45 1 1h-1v1h1v2h-1v1h1v2h-2V5z"/></svg>
                     <span id="cpuTempText">—°C</span>
                 </div>
-                <div style="display:flex; align-items:center; gap:4px; font-size:13px; font-weight:600; color:var(--text-secondary);" title="Battery">
-                    <svg viewBox="0 0 24 24" style="width:16px; height:16px; fill:currentColor;"><path d="M15.67 4H14V2h-4v2H8.33C7.6 4 7 4.6 7 5.33v15.33C7 21.4 7.6 22 8.33 22h7.33c.74 0 1.34-.6 1.34-1.33V5.33C17 4.6 16.4 4 15.67 4z"/></svg>
+                <div style="display:flex; align-items:center; gap:4px; font-size:13px; font-weight:600; color:var(--text-secondary);" title="Battery" id="batteryBadge">
+                    <svg viewBox="0 0 24 24" style="width:16px; height:16px; fill:currentColor;"><path id="batteryIconPath" fill-rule="evenodd" d="M15.67 4H14V2h-4v2H8.33C7.6 4 7 4.6 7 5.33v15.33C7 21.4 7.6 22 8.33 22h7.33c.74 0 1.34-.6 1.34-1.33V5.33C17 4.6 16.4 4 15.67 4z"/></svg>
                     <span id="batteryText">—%</span>
                 </div>
                 <div style="display:flex; align-items:center; gap:4px; font-size:13px; font-weight:600; color:var(--text-secondary);" title="WiFi Signal">
@@ -661,6 +661,13 @@
             select.dataset.populated = '1';
         }
 
+        // --- Battery icon ---
+        // Same battery outline either way; the charging variant adds a bolt cut out of
+        // the solid fill (fill-rule="evenodd" on the <path>, set once in the markup,
+        // renders any inner subpath as a hole).
+        const BATTERY_PATH_PLAIN = 'M15.67 4H14V2h-4v2H8.33C7.6 4 7 4.6 7 5.33v15.33C7 21.4 7.6 22 8.33 22h7.33c.74 0 1.34-.6 1.34-1.33V5.33C17 4.6 16.4 4 15.67 4z';
+        const BATTERY_PATH_CHARGING = BATTERY_PATH_PLAIN + 'M13 6L10 13L12 13L11 20L15 11L13 11Z';
+
         // --- Uptime formatting ---
         // Days shown only once a full day has elapsed; hours shown only once a full
         // hour has elapsed (so a fresh boot reads "3m", not "0d 0h 3m").
@@ -689,12 +696,16 @@
                     const btnStreamText = document.getElementById('btnStreamText');
                     const chipCodec = document.getElementById('chipCodec');
                     const chipRes = document.getElementById('chipRes');
+                    const batteryBadge = document.getElementById('batteryBadge');
                     const batteryText = document.getElementById('batteryText');
+                    const batteryIconPath = document.getElementById('batteryIconPath');
                     const wifiText = document.getElementById('wifiText');
                     const cpuTempText = document.getElementById('cpuTempText');
                     const uptimeText = document.getElementById('uptimeText');
 
                     if (data.batteryLevel >= 0) batteryText.textContent = data.batteryLevel + '%';
+                    batteryIconPath.setAttribute('d', data.isCharging === true ? BATTERY_PATH_CHARGING : BATTERY_PATH_PLAIN);
+                    batteryBadge.title = data.isCharging === true ? 'Battery (Charging)' : 'Battery';
                     if (data.wifiStrength >= 0) wifiText.textContent = data.wifiStrength + '%';
                     if (data.cpuTempCelsius !== null && data.cpuTempCelsius !== undefined) {
                         cpuTempText.textContent = data.cpuTempCelsius + '°C';

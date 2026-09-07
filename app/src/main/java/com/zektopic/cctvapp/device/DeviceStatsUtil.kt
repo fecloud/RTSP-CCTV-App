@@ -28,6 +28,20 @@ object DeviceStatsUtil {
     }
 
     /**
+     * Whether the device is currently charging (including topped-up-but-still-plugged-in),
+     * or null if unavailable. Same direct-`BatteryManager` approach as [getBatteryLevel],
+     * rather than a sticky-broadcast registration, since this is polled just as often.
+     */
+    fun isCharging(context: Context): Boolean? {
+        val batteryManager = context.getSystemService(Context.BATTERY_SERVICE) as? BatteryManager ?: return null
+        return when (batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_STATUS)) {
+            BatteryManager.BATTERY_STATUS_CHARGING, BatteryManager.BATTERY_STATUS_FULL -> true
+            BatteryManager.BATTERY_STATUS_DISCHARGING, BatteryManager.BATTERY_STATUS_NOT_CHARGING -> false
+            else -> null
+        }
+    }
+
+    /**
      * Battery temperature in Celsius, or null if unavailable.
      *
      * Unlike CPU temperature, this is a proper documented API: `EXTRA_TEMPERATURE` on
