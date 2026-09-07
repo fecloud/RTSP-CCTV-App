@@ -14,6 +14,7 @@ rootEncoder = "2.7.2"
 rtspServer = "1.4.1"
 nanohttpd = "2.3.1"
 kotlinxCoroutines = "1.10.2"
+buglyCrashreport = "4.1.9.3"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -28,6 +29,7 @@ rootencoder-library = { group = "com.github.pedroSG94.RootEncoder", name = "libr
 rtsp-server = { group = "com.github.pedroSG94", name = "RTSP-Server", version.ref = "rtspServer" }
 nanohttpd = { group = "org.nanohttpd", name = "nanohttpd", version.ref = "nanohttpd" }
 kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "kotlinxCoroutines" }
+bugly-crashreport = { group = "com.tencent.bugly", name = "crashreport", version.ref = "buglyCrashreport" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
