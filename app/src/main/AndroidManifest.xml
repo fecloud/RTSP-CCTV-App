@@ -7,6 +7,13 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- Since Android 8.1, WifiManager.connectionInfo returns a placeholder RSSI to apps
+         without this permission (and with system location services off), making the
+         dashboard's Wi-Fi signal readout unusable without it. COARSE is declared
+         alongside per Android 12+'s requirement that FINE requests offer a COARSE
+         fallback; getWifiStrength() already handles a COARSE-only grant as -1. -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
     <!-- Required whenever audio capture is enabled: Android 14+ throws SecurityException

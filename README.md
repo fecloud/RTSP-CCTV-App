@@ -248,7 +248,7 @@ cross-origin `Origin` header are rejected with `403`.
 | `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_CAMERA` | Yes | Long-running capture. |
 | `RECORD_AUDIO`, `FOREGROUND_SERVICE_MICROPHONE` | Only with audio on | Audio is opt-in; the microphone type is only claimed when you enable it. |
 | `POST_NOTIFICATIONS` | Recommended | Android 13+. Without it the service notification is suppressed and you lose the visible indicator that the camera is live. |
-| `ACCESS_WIFI_STATE` | Optional | Wi-Fi signal readout on the dashboard. |
+| `ACCESS_WIFI_STATE`, `ACCESS_FINE_LOCATION` | Optional | Wi-Fi signal readout on the dashboard. Android 8.1+ hands back a placeholder RSSI (so the dashboard shows no signal) unless the app has location permission *and* the device's system location toggle is on. |
 | `WRITE_EXTERNAL_STORAGE` | Only on Android 9 and below, with gallery recording on | Writing video segments to the gallery pre-scoped-storage. Not needed on Android 10+, where the app writes its own `MediaStore` rows without any permission. |
 
 No internet permission is used to send data anywhere. Nothing leaves your network.

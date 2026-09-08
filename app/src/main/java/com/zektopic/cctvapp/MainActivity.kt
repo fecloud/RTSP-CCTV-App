@@ -42,13 +42,17 @@ class MainActivity : AppCompatActivity() {
 
     /**
      * CAMERA is the only hard requirement. RECORD_AUDIO is requested alongside it so the
-     * optional audio toggle works without a second prompt, and POST_NOTIFICATIONS is
-     * needed from API 33 for the foreground-service notification to appear at all.
+     * optional audio toggle works without a second prompt, POST_NOTIFICATIONS is needed
+     * from API 33 for the foreground-service notification to appear at all, and
+     * ACCESS_FINE_LOCATION is requested because Android 8.1+ won't hand back a real
+     * Wi-Fi RSSI to an app without it (see DeviceStatsUtil.getWifiStrength) -- without
+     * this the dashboard's Wi-Fi signal readout is permanently unavailable.
      */
     private val permissions: Array<String>
         get() = buildList {
             add(Manifest.permission.CAMERA)
             add(Manifest.permission.RECORD_AUDIO)
+            add(Manifest.permission.ACCESS_FINE_LOCATION)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 add(Manifest.permission.POST_NOTIFICATIONS)
             }
