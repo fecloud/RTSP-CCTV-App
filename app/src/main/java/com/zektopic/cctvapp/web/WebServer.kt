@@ -5,10 +5,10 @@ import android.os.SystemClock
 import com.zektopic.cctvapp.log.AppLog as Log
 import com.zektopic.cctvapp.camera.CameraResolutionUtil
 import com.zektopic.cctvapp.device.DeviceStatsUtil
-import com.zektopic.cctvapp.service.GalleryRecordingManager
+import com.zektopic.cctvapp.service.RecordingsGallery
 import com.zektopic.cctvapp.settings.ServiceSettings
 import com.zektopic.cctvapp.settings.SettingUpdateHandler
-import com.zektopic.cctvapp.settings.SettingsRepository
+import com.zektopic.cctvapp.settings.ServiceStateRepository
 import fi.iki.elonen.NanoHTTPD
 import java.io.ByteArrayInputStream
 import java.io.InputStream
@@ -27,7 +27,6 @@ class WebServer(
     private val onStopStream: () -> Unit,
     private val isStreaming: () -> Boolean,
     private val getZoomRange: () -> Pair<Float, Float>,
-    private val galleryRecordingManager: GalleryRecordingManager,
     port: Int = PORT
 ) : NanoHTTPD(port) {
 
@@ -40,7 +39,7 @@ class WebServer(
     }
 
     /** Same data source [com.zektopic.cctvapp.MainActivity] and the service read/write. */
-    private val settings: ServiceSettings get() = SettingsRepository.current
+    private val settings: ServiceSettings get() = ServiceStateRepository.current
     private val settingUpdateHandler by lazy { SettingUpdateHandler(context) }
 
     /** Set at construction, i.e. service start -- backs the `/status` `uptimeMillis` field. */
@@ -116,7 +115,7 @@ class WebServer(
 
         if (uri == "/action/set-codec") {
             val codec = session.parameters["codec"]?.get(0) ?: "H264"
-            settingUpdateHandler.handleCodec(codec)
+            settingUpdateHandler.handle("video_codec", codec)
             return newFixedLengthResponse(Response.Status.OK, MIME_PLAINTEXT, "Codec Updated")
         }
 
@@ -181,8 +180,7 @@ class WebServer(
                 "uptimeMillis":${SystemClock.elapsedRealtime() - startElapsedRealtimeMs},
                 "webAuthEnabled":${s.webAuthEnabled},
                 "recordToGalleryEnabled":${s.recordToGalleryEnabled},
-                "recordSegmentMinutes":${s.recordSegmentMinutes},
-                "isRecordingToGallery":${galleryRecordingManager.isRecordingToGallery}
+                "recordSegmentMinutes":${s.recordSegmentMinutes}
             }""".trimIndent()
             return newFixedLengthResponse(Response.Status.OK, "application/json", json)
         }
@@ -192,18 +190,19 @@ class WebServer(
         }
 
         if (uri == "/recordings") {
-            return newFixedLengthResponse(buildRecordingsHtml(galleryRecordingManager.listRecordings()))
+            return newFixedLengthResponse(buildRecordingsHtml(RecordingsGallery.listRecordings(context)))
         }
 
         // Streams/downloads one recording. Honors a single-range `Range` header (what
         // browsers send when the user drags a <video>'s seek bar) so playback can jump
-        // around instead of only playing straight through from the start.
+        // around instead of only playing straight through from the start. Pure
+        // MediaStore reads -- available even while CctvServerService isn't running.
         if (uri == "/recording.mp4") {
             val id = session.parameters["id"]?.get(0)?.toLongOrNull()
                 ?: return newFixedLengthResponse(Response.Status.BAD_REQUEST, MIME_PLAINTEXT, "Missing id")
-            val entry = galleryRecordingManager.listRecordings().find { it.id == id }
+            val entry = RecordingsGallery.listRecordings(context).find { it.id == id }
                 ?: return newFixedLengthResponse(Response.Status.NOT_FOUND, MIME_PLAINTEXT, "Recording not found")
-            val stream = galleryRecordingManager.openRecordingStream(id)
+            val stream = RecordingsGallery.openRecordingStream(context, id)
                 ?: return newFixedLengthResponse(Response.Status.NOT_FOUND, MIME_PLAINTEXT, "Recording not found")
             val download = session.parameters["download"]?.get(0) == "1"
             val disposition = if (download) "attachment" else "inline"

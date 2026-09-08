@@ -747,7 +747,7 @@
                     if (document.activeElement.id !== 'recordSegmentMinutes') {
                         document.getElementById('recordSegmentMinutes').value = data.recordSegmentMinutes;
                     }
-                    document.getElementById('chipRec').style.display = data.isRecordingToGallery ? 'inline-block' : 'none';
+                    document.getElementById('chipRec').style.display = data.recordToGalleryEnabled ? 'inline-block' : 'none';
 
                     // Sync auth
                     document.getElementById('toggleAuth').checked = data.authEnabled;

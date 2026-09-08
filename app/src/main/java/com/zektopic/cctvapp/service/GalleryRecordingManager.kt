@@ -15,9 +15,7 @@ import androidx.core.content.ContextCompat
 import com.pedro.library.base.recording.RecordController
 import com.pedro.rtspserver.RtspServerCamera2
 import com.zektopic.cctvapp.device.DeviceStatsUtil
-import com.zektopic.cctvapp.web.RecordingEntry
 import java.io.File
-import java.io.InputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -54,9 +52,6 @@ class GalleryRecordingManager(
 ) {
     companion object {
         private const val TAG = "GalleryRecordingManager"
-
-        /** Where gallery recording segments are saved, relative to the shared Movies collection. */
-        private const val RECORDING_RELATIVE_PATH = "Movies/CCTVApp/"
     }
 
     /** Read-only status surfaced in /status -- true only while a segment is actively being written. */
@@ -120,67 +115,6 @@ class GalleryRecordingManager(
     fun shutdown() {
         stop()
         managerScope.cancel()
-    }
-
-    /** Lists finished recordings under [RECORDING_RELATIVE_PATH], newest first. */
-    fun listRecordings(): List<RecordingEntry> {
-        val entries = mutableListOf<RecordingEntry>()
-        try {
-            val projection = arrayOf(
-                MediaStore.Video.Media._ID,
-                MediaStore.Video.Media.DISPLAY_NAME,
-                MediaStore.Video.Media.SIZE,
-                MediaStore.Video.Media.DATE_ADDED
-            )
-            val sortOrder = "${MediaStore.Video.Media.DATE_ADDED} DESC"
-            val (selection, selectionArgs) = recordingsSelection()
-            context.contentResolver.query(
-                MediaStore.Video.Media.EXTERNAL_CONTENT_URI, projection, selection, selectionArgs, sortOrder
-            )?.use { cursor ->
-                val idIdx = cursor.getColumnIndexOrThrow(MediaStore.Video.Media._ID)
-                val nameIdx = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DISPLAY_NAME)
-                val sizeIdx = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.SIZE)
-                val dateIdx = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DATE_ADDED)
-                while (cursor.moveToNext()) {
-                    entries.add(
-                        RecordingEntry(
-                            id = cursor.getLong(idIdx),
-                            displayName = cursor.getString(nameIdx) ?: "recording.mp4",
-                            sizeBytes = cursor.getLong(sizeIdx),
-                            dateAddedMillis = cursor.getLong(dateIdx) * 1000L
-                        )
-                    )
-                }
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to list recordings", e)
-        }
-        return entries
-    }
-
-    /**
-     * Opens a recording for serving over HTTP. Re-validates [id] against
-     * [recordingsSelection] rather than trusting the caller, so this can't be used to
-     * read arbitrary gallery content the app didn't itself record.
-     */
-    fun openRecordingStream(id: Long): InputStream? {
-        return try {
-            val (baseSelection, baseArgs) = recordingsSelection()
-            val selection = "$baseSelection AND ${MediaStore.Video.Media._ID} = ?"
-            val selectionArgs = baseArgs + id.toString()
-            var found = false
-            context.contentResolver.query(
-                MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
-                arrayOf(MediaStore.Video.Media._ID),
-                selection, selectionArgs, null
-            )?.use { cursor -> found = cursor.moveToFirst() }
-            if (!found) return null
-            val uri = android.content.ContentUris.withAppendedId(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, id)
-            context.contentResolver.openInputStream(uri)
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to open recording $id for serving", e)
-            null
-        }
     }
 
     /**
@@ -278,7 +212,7 @@ class GalleryRecordingManager(
             val values = ContentValues().apply {
                 put(MediaStore.Video.Media.DISPLAY_NAME, fileName)
                 put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
-                put(MediaStore.Video.Media.RELATIVE_PATH, RECORDING_RELATIVE_PATH)
+                put(MediaStore.Video.Media.RELATIVE_PATH, RecordingsGallery.RECORDING_RELATIVE_PATH)
                 put(MediaStore.Video.Media.IS_PENDING, 1)
             }
             val uri = resolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values) ?: run {
@@ -363,17 +297,17 @@ class GalleryRecordingManager(
 
     /**
      * Loop recording: once local storage usage crosses [recordStorageThresholdPercent],
-     * deletes the oldest finished segments under [RECORDING_RELATIVE_PATH] one at a
-     * time -- rechecking usage after each delete -- until it drops back under the
-     * threshold or there's nothing left to delete. Runs on [mediaStoreDispatcher] after
-     * each segment finalizes, so a server left running indefinitely doesn't fill the
-     * device's storage.
+     * deletes the oldest finished segments under [RecordingsGallery.RECORDING_RELATIVE_PATH]
+     * one at a time -- rechecking usage after each delete -- until it drops back under
+     * the threshold or there's nothing left to delete. Runs on [mediaStoreDispatcher]
+     * after each segment finalizes, so a server left running indefinitely doesn't fill
+     * the device's storage.
      */
     private fun enforceRetention() {
         try {
             val projection = arrayOf(MediaStore.Video.Media._ID)
             val sortOrder = "${MediaStore.Video.Media.DATE_ADDED} ASC"
-            val (selection, selectionArgs) = recordingsSelection()
+            val (selection, selectionArgs) = RecordingsGallery.selection(context)
 
             val ids = ArrayDeque<Long>()
             context.contentResolver.query(
@@ -392,18 +326,6 @@ class GalleryRecordingManager(
             }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to enforce recording retention", e)
-        }
-    }
-
-    /** Selects rows under [RECORDING_RELATIVE_PATH] -- shared by retention and listing. */
-    @Suppress("DEPRECATION") // MediaStore.Video.Media.DATA / Environment.getExternalStoragePublicDirectory: pre-Q only path
-    private fun recordingsSelection(): Pair<String, Array<String>> {
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            "${MediaStore.Video.Media.RELATIVE_PATH} = ? AND ${MediaStore.Video.Media.IS_PENDING} = 0" to
-                arrayOf(RECORDING_RELATIVE_PATH)
-        } else {
-            val moviesDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES), "CCTVApp")
-            "${MediaStore.Video.Media.DATA} LIKE ?" to arrayOf("${moviesDir.absolutePath}/%")
         }
     }
 }

@@ -24,7 +24,7 @@ import com.zektopic.cctvapp.camera.CameraResolutionUtil
 import com.zektopic.cctvapp.databinding.ActivityMainBinding
 import com.zektopic.cctvapp.service.CctvServerService
 import com.zektopic.cctvapp.settings.AppPreferences
-import com.zektopic.cctvapp.settings.SettingsRepository
+import com.zektopic.cctvapp.settings.ServiceStateRepository
 import com.zektopic.cctvapp.web.WebAuth
 import com.zektopic.cctvapp.web.WebServer
 import java.net.Inet4Address
@@ -82,7 +82,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        SettingsRepository.ensureLoaded(this)
+        ServiceStateRepository.ensureLoaded(this)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
@@ -131,7 +131,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun loadSavedSettings() {
-        val s = SettingsRepository.current
+        val s = ServiceStateRepository.current
 
         // Load saved codec
         (binding.spinnerCodec as? AutoCompleteTextView)?.setText(
@@ -211,27 +211,27 @@ class MainActivity : AppCompatActivity() {
 
         binding.btnSwitchCamera.setOnClickListener {
             if (binding.switchServer.isChecked) {
-                sendServiceAction("ACTION_SWITCH_CAMERA")
+                ServiceStateRepository.updateRuntime { it.copy(switchCameraRequest = it.switchCameraRequest + 1) }
             }
         }
 
         (binding.spinnerResolution as? AutoCompleteTextView)?.setOnItemClickListener { _, _, position, _ ->
             val (width, height) = parseResolution(resolutions[position])
-            SettingsRepository.update(this) { it.copy(videoWidth = width, videoHeight = height) }
+            ServiceStateRepository.updateSettings(this) { it.copy(videoWidth = width, videoHeight = height) }
         }
 
         (binding.spinnerCodec as? AutoCompleteTextView)?.setOnItemClickListener { _, _, position, _ ->
-            SettingsRepository.update(this) { it.copy(videoCodec = codecs[position]) }
+            ServiceStateRepository.updateSettings(this) { it.copy(videoCodec = codecs[position]) }
         }
 
         (binding.spinnerBitrate as? AutoCompleteTextView)?.setOnItemClickListener { _, _, position, _ ->
             val kbps = bitrateKbpsValues[position]
-            SettingsRepository.update(this) { it.copy(bitrateKbps = kbps) }
+            ServiceStateRepository.updateSettings(this) { it.copy(bitrateKbps = kbps) }
         }
 
         // Auth listeners
         binding.switchAuth.setOnCheckedChangeListener { _, isChecked ->
-            SettingsRepository.update(this) { it.copy(authEnabled = isChecked) }
+            ServiceStateRepository.updateSettings(this) { it.copy(authEnabled = isChecked) }
             setAuthFieldsEnabled(isChecked)
             updateNetworkInfo()
         }
@@ -255,15 +255,15 @@ class MainActivity : AppCompatActivity() {
 
         // Overlay listeners
         binding.switchTimestamp.setOnCheckedChangeListener { _, isChecked ->
-            SettingsRepository.update(this) { it.copy(showTimestamp = isChecked) }
+            ServiceStateRepository.updateSettings(this) { it.copy(showTimestamp = isChecked) }
         }
 
         (binding.spinnerOverlayPosition as? AutoCompleteTextView)?.setOnItemClickListener { _, _, position, _ ->
-            SettingsRepository.update(this) { it.copy(timestampPosition = overlayPositions[position]) }
+            ServiceStateRepository.updateSettings(this) { it.copy(timestampPosition = overlayPositions[position]) }
         }
 
         (binding.spinnerOverlaySize as? AutoCompleteTextView)?.setOnItemClickListener { _, _, position, _ ->
-            SettingsRepository.update(this) { it.copy(timestampSize = overlaySizes[position]) }
+            ServiceStateRepository.updateSettings(this) { it.copy(timestampSize = overlaySizes[position]) }
         }
 
         // Copy buttons
@@ -277,26 +277,26 @@ class MainActivity : AppCompatActivity() {
 
         // Flashlight & Night Mode listeners
         binding.switchFlashlight.setOnCheckedChangeListener { _, isChecked ->
-            SettingsRepository.update(this) { it.copy(flashlightEnabled = isChecked) }
+            ServiceStateRepository.updateSettings(this) { it.copy(flashlightEnabled = isChecked) }
         }
 
         binding.switchNightMode.setOnCheckedChangeListener { _, isChecked ->
-            SettingsRepository.update(this) { it.copy(nightModeEnabled = isChecked) }
+            ServiceStateRepository.updateSettings(this) { it.copy(nightModeEnabled = isChecked) }
         }
 
         binding.switchVerticalFlip.setOnCheckedChangeListener { _, isChecked ->
-            SettingsRepository.update(this) { it.copy(verticalFlipEnabled = isChecked) }
+            ServiceStateRepository.updateSettings(this) { it.copy(verticalFlipEnabled = isChecked) }
         }
 
         setupZoomSlider()
 
         binding.switchWebAuth.setOnCheckedChangeListener { _, isChecked ->
-            SettingsRepository.update(this) { it.copy(webAuthEnabled = isChecked) }
+            ServiceStateRepository.updateSettings(this) { it.copy(webAuthEnabled = isChecked) }
             if (isChecked) showGeneratedPasswordIfAny()
         }
 
         binding.switchAudio.setOnCheckedChangeListener { _, isChecked ->
-            SettingsRepository.update(this) { it.copy(audioEnabled = isChecked) }
+            ServiceStateRepository.updateSettings(this) { it.copy(audioEnabled = isChecked) }
         }
 
         binding.switchAutoStart.setOnCheckedChangeListener { _, isChecked ->
@@ -304,7 +304,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         binding.switchRecordToGallery.setOnCheckedChangeListener { _, isChecked ->
-            SettingsRepository.update(this) { it.copy(recordToGalleryEnabled = isChecked) }
+            ServiceStateRepository.updateSettings(this) { it.copy(recordToGalleryEnabled = isChecked) }
         }
 
         binding.editRecordSegmentMinutes.setOnFocusChangeListener { _, hasFocus ->
@@ -313,7 +313,7 @@ class MainActivity : AppCompatActivity() {
                 ?.coerceIn(AppPreferences.RECORD_SEGMENT_MINUTES_MIN, AppPreferences.RECORD_SEGMENT_MINUTES_MAX)
                 ?: AppPreferences.DEFAULT_RECORD_SEGMENT_MINUTES
             binding.editRecordSegmentMinutes.setText(minutes.toString())
-            SettingsRepository.update(this) { it.copy(recordSegmentMinutes = minutes) }
+            ServiceStateRepository.updateSettings(this) { it.copy(recordSegmentMinutes = minutes) }
         }
 
         binding.editRecordStorageThresholdPercent.setOnFocusChangeListener { _, hasFocus ->
@@ -325,12 +325,12 @@ class MainActivity : AppCompatActivity() {
                 )
                 ?: AppPreferences.DEFAULT_RECORD_STORAGE_THRESHOLD_PERCENT
             binding.editRecordStorageThresholdPercent.setText(percent.toString())
-            SettingsRepository.update(this) { it.copy(recordStorageThresholdPercent = percent) }
+            ServiceStateRepository.updateSettings(this) { it.copy(recordStorageThresholdPercent = percent) }
         }
     }
 
     /**
-     * Debounces the push to [SettingsRepository] (and, transitively, to a running
+     * Debounces the push to [ServiceStateRepository] (and, transitively, to a running
      * service's live camera zoom) -- otherwise a drag would call it dozens of times a
      * second. The debounce is flushed immediately on release so the final value is never
      * delayed.
@@ -341,14 +341,14 @@ class MainActivity : AppCompatActivity() {
             zoomDebounceJob?.cancel()
             zoomDebounceJob = activityScope.launch {
                 delay(120)
-                SettingsRepository.update(this@MainActivity) { it.copy(zoomLevel = value) }
+                ServiceStateRepository.updateSettings(this@MainActivity) { it.copy(zoomLevel = value) }
             }
         }
         binding.sliderZoomLevel.addOnSliderTouchListener(object : Slider.OnSliderTouchListener {
             override fun onStartTrackingTouch(slider: Slider) {}
             override fun onStopTrackingTouch(slider: Slider) {
                 zoomDebounceJob?.cancel()
-                SettingsRepository.update(this@MainActivity) { it.copy(zoomLevel = slider.value) }
+                ServiceStateRepository.updateSettings(this@MainActivity) { it.copy(zoomLevel = slider.value) }
             }
         })
     }
@@ -406,7 +406,7 @@ class MainActivity : AppCompatActivity() {
 
     /**
      * Makes sure the service process is actually running. No settings are carried on
-     * this intent -- [CctvServerService] loads them straight from [SettingsRepository]
+     * this intent -- [CctvServerService] loads them straight from [ServiceStateRepository]
      * (the same data source every setting listener in this activity writes to directly),
      * so a live service already has whatever the current values are.
      */
@@ -417,13 +417,6 @@ class MainActivity : AppCompatActivity() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             startForegroundService(intent)
         } else {
-            startService(intent)
-        }
-    }
-
-    private fun sendServiceAction(action: String) {
-        Intent(this, CctvServerService::class.java).also { intent ->
-            intent.action = action
             startService(intent)
         }
     }
@@ -466,7 +459,7 @@ class MainActivity : AppCompatActivity() {
 
         // Set RTSP and Web URLs
         if (ipv4Address != null) {
-            val s = SettingsRepository.current
+            val s = ServiceStateRepository.current
             if (s.authEnabled && s.authUsername.isNotEmpty() && s.authPassword.isNotEmpty()) {
                 binding.textRtspUrl.text = "rtsp://${s.authUsername}:${s.authPassword}@$ip:8554/stream"
             } else {
@@ -487,7 +480,7 @@ class MainActivity : AppCompatActivity() {
     private fun applyCredentialsIfChanged() {
         val username = binding.editUsername.text.toString()
         val password = binding.editPassword.text.toString()
-        SettingsRepository.update(this) { it.copy(authUsername = username, authPassword = password) }
+        ServiceStateRepository.updateSettings(this) { it.copy(authUsername = username, authPassword = password) }
         updateNetworkInfo()
     }
 
@@ -503,7 +496,7 @@ class MainActivity : AppCompatActivity() {
         // back through SettingsRepository.update so the shared repository doesn't go
         // stale relative to what's actually persisted.
         val username = AppPreferences.getUsername(this)
-        SettingsRepository.update(this) { it.copy(authUsername = username, authPassword = generated) }
+        ServiceStateRepository.updateSettings(this) { it.copy(authUsername = username, authPassword = generated) }
 
         binding.editUsername.setText(username)
         binding.editPassword.setText(generated)
@@ -511,7 +504,7 @@ class MainActivity : AppCompatActivity() {
         // Only claim the dashboard is protected when it actually is. The password is
         // seeded regardless of the toggle, so with it off the old wording told the user
         // they were covered while the dashboard stayed reachable by anyone on the network.
-        val message = if (SettingsRepository.current.webAuthEnabled) {
+        val message = if (ServiceStateRepository.current.webAuthEnabled) {
             getString(R.string.generated_password_message, generated)
         } else {
             getString(R.string.generated_password_message_unprotected, generated)

@@ -58,7 +58,6 @@ object CameraResolutionUtil {
 
             if (chosen.isEmpty()) return FALLBACK
 
-            Log.d(TAG, "Supported resolutions: " + chosen.joinToString { "${it.first}x${it.second}" })
             chosen
         } catch (e: Exception) {
             Log.e(TAG, "Failed to query camera resolutions", e)
@@ -98,13 +97,10 @@ object CameraResolutionUtil {
                     ?.let { Pair(1.0f, it) }
                 ?: FALLBACK_ZOOM_RANGE
 
-            val resolved = Pair(
+            Pair(
                 kotlin.math.floor(rawMin / ZOOM_STEP) * ZOOM_STEP,
                 kotlin.math.ceil(rawMax / ZOOM_STEP) * ZOOM_STEP,
             )
-
-            Log.d(TAG, "Zoom range: ${resolved.first}x-${resolved.second}x (raw $rawMin-$rawMax)")
-            resolved
         } catch (e: Exception) {
             Log.e(TAG, "Failed to query camera zoom range", e)
             FALLBACK_ZOOM_RANGE

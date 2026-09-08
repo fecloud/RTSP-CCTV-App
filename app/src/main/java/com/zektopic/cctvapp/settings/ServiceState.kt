@@ -68,3 +68,26 @@ data class ServiceSettings(
         )
     }
 }
+
+/**
+ * Runtime status/commands published by [com.zektopic.cctvapp.service.CctvServerService],
+ * not user prefs. Held in its own `MutableStateFlow` in [ServiceStateRepository] -- deliberately
+ * *not* a field on [ServiceSettings] -- so live camera state and one-shot dashboard
+ * commands never trigger [ServiceSettings]'s settings-effects diff/persist path, and vice
+ * versa: a settings change never gets conflated with a runtime one.
+ */
+data class ServiceRuntimeState(
+    /** True only once the camera exists and is actively streaming. */
+    val isStreaming: Boolean = false,
+    val zoomRange: Pair<Float, Float> = 1f to 1f,
+    /**
+     * Bumped by `WebServer` (via [ServiceStateRepository.updateRuntime]) to request an
+     * action; [com.zektopic.cctvapp.service.CctvServerService] reacts to *any* change,
+     * including a value that looks the same as last time -- these are one-shot
+     * commands, not persisted state, so a plain boolean would get conflated away by
+     * `StateFlow`'s no-op equality check.
+     */
+    val startStreamRequest: Int = 0,
+    val stopStreamRequest: Int = 0,
+    val switchCameraRequest: Int = 0,
+)

@@ -17,7 +17,7 @@ import java.util.concurrent.Executors
  * [init] must run before any `d`/`e`/`w` call, which [com.zektopic.cctvapp.CctvApplication]
  * guarantees by calling it from `onCreate` -- Android always runs `Application.onCreate`
  * before any other app component, so there's no need to guard against a missing [init]
- * the way [com.zektopic.cctvapp.settings.SettingsRepository.ensureLoaded] has to (that one
+ * the way [com.zektopic.cctvapp.settings.ServiceStateRepository.ensureLoaded] has to (that one
  * is called from multiple entry points, not exactly once at the very start).
  */
 object AppLog {

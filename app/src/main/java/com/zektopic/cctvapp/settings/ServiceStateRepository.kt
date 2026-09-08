@@ -13,13 +13,32 @@ import kotlinx.coroutines.flow.updateAndGet
  * to round-trip a setting change through an `Intent` or HTTP round trip for a live
  * service to notice it: writing here is enough. `CctvServerService`'s settings-effects
  * collector observes [settings] directly and reacts to whatever actually changed.
+ *
+ * Also holds [runtimeFlow]/[ServiceRuntimeState] -- a second, unrelated `StateFlow` for
+ * live camera status and one-shot dashboard commands, deliberately not part of
+ * [ServiceSettings] (see [ServiceRuntimeState]'s kdoc).
  */
-object SettingsRepository {
+object ServiceStateRepository {
     private val _settings = MutableStateFlow(ServiceSettings())
     val settings: StateFlow<ServiceSettings> = _settings.asStateFlow()
 
     /** Convenience synchronous snapshot, equivalent to `settings.value`. */
     val current: ServiceSettings get() = _settings.value
+
+    /**
+     * Separate from [settings] on purpose -- see [ServiceRuntimeState]'s kdoc. Nothing
+     * here is persisted, so unlike [updateSettings] this needs no `Context`.
+     */
+    private val _runtime = MutableStateFlow(ServiceRuntimeState())
+    val runtimeFlow: StateFlow<ServiceRuntimeState> = _runtime.asStateFlow()
+
+    /** Convenience synchronous snapshot, equivalent to `runtimeFlow.value`. */
+    val runtime: ServiceRuntimeState get() = _runtime.value
+
+    /** Applies [transform] to the current runtime snapshot and publishes the result. */
+    fun updateRuntime(transform: (ServiceRuntimeState) -> ServiceRuntimeState) {
+        _runtime.updateAndGet(transform)
+    }
 
     @Volatile private var loaded = false
 
@@ -39,7 +58,7 @@ object SettingsRepository {
      * new setting needs wiring into, instead of every write site pairing its own
      * `AppPreferences.setX` call with pushing the change somewhere else.
      */
-    fun update(context: Context, transform: (ServiceSettings) -> ServiceSettings) {
+    fun updateSettings(context: Context, transform: (ServiceSettings) -> ServiceSettings) {
         ensureLoaded(context)
         val new = _settings.updateAndGet(transform)
         persist(context.applicationContext, new)

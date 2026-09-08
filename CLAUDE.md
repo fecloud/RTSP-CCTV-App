@@ -42,7 +42,7 @@ to be one flat package, but it grew past the point that stayed readable):
 |---|---|---|
 | *(root)* | `MainActivity.kt`, `CctvApplication.kt` | App entry points — the components Android launches by class name, plus process-wide init (Bugly, `AppLog`, the always-on `WebServer`) in `CctvApplication.onCreate` |
 | `.service` | `CctvServerService.kt`, `GalleryRecordingManager.kt`, `ServiceNotificationUtil.kt` | The foreground service: camera/encoder/stream lifecycle, gallery recording, the notification |
-| `.settings` | `AppPreferences.kt`, `ServiceSettings.kt`, `SettingsRepository.kt`, `SettingEffects.kt`, `SettingUpdateHandler.kt` | Settings persistence and the shared in-memory data source (see "Settings: one shared data source" below) |
+| `.settings` | `AppPreferences.kt`, `ServiceState.kt`, `ServiceStateRepository.kt`, `SettingEffects.kt`, `SettingUpdateHandler.kt` | Settings persistence and the shared in-memory data source (see "Settings: one shared data source" below) |
 | `.web` | `WebServer.kt`, `WebAuth.kt` | NanoHTTPD dashboard server + HTTP Basic auth |
 | `.camera` | `CameraResolutionUtil.kt` | Camera2 supported-resolution querying, shared by the service, `GalleryRecordingManager`, and `MainActivity` |
 | `.device` | `DeviceStatsUtil.kt`, `ThermalZoneUtil.kt` | Battery/CPU/Wi-Fi telemetry surfaced in `/status` and the timestamp overlay |
