@@ -13,7 +13,6 @@ import android.hardware.SensorManager
 import android.os.Build
 import android.os.IBinder
 import com.zektopic.cctvapp.log.AppLog as Log
-import android.view.SurfaceHolder
 import com.pedro.common.ConnectChecker
 import com.pedro.common.VideoCodec
 import com.pedro.encoder.input.gl.render.filters.`object`.TextObjectFilterRender
@@ -40,7 +39,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlin.time.Duration.Companion.milliseconds
 
-class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
+class CctvServerService : Service(), ConnectChecker {
 
     companion object {
         private const val TAG = "CctvServerService"
@@ -55,9 +54,6 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
     }
 
     private lateinit var rtspServerCamera: RtspServerCamera2
-    private var isSurfaceCreated = false
-
-    private val overlayWindow by lazy { OverlayWindow(this) }
 
     /** [rtspServerCamera] once created, or null before the first [startStream] call. */
     private val cameraOrNull: RtspServerCamera2?
@@ -79,9 +75,9 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
     /**
      * Runs [block] on the main thread.
      *
-     * Every WebServer callback arrives on a NanoHTTPD worker thread, but touching the
-     * camera or the overlay view off the main thread throws (`updateViewLayout` raises
-     * CalledFromWrongThreadException). Only the *side effects* are posted -- the state
+     * Every WebServer callback arrives on a NanoHTTPD worker thread, but the camera
+     * calls this serializes onto the main thread are kept there out of caution rather
+     * than a documented requirement. Only the *side effects* are posted -- the state
      * fields themselves are assigned synchronously by the caller, so a request that
      * changes a setting still reflects the new value by the time it responds.
      * `Dispatchers.Main.immediate` reproduces that exactly: launched from the main
@@ -121,7 +117,7 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
     private fun startSnapshotLoop() {
         serviceScope.launch {
             while (isActive) {
-                val streaming = isCameraStreaming && isSurfaceCreated
+                val streaming = isCameraStreaming
 
                 val viewerActive =
                     System.currentTimeMillis() - lastSnapshotRequestMs < VIEWER_IDLE_TIMEOUT_MS
@@ -168,7 +164,7 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
             },
             onStartStream = {
                 onMain {
-                    if (isSurfaceCreated && !isCameraStreaming) {
+                    if (!isCameraStreaming) {
                         startStream()
                     }
                 }
@@ -202,15 +198,13 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
         sensorManager = getSystemService(SENSOR_SERVICE) as SensorManager
         lightSensor = sensorManager?.getDefaultSensor(Sensor.TYPE_LIGHT)
 
-        overlayWindow.attach(this)
-
         webServer.start()
         startSnapshotLoop()
 
-        // Started last, once everything it might touch (overlayWindow attached, webServer
-        // constructed) already exists -- Dispatchers.Main.immediate can run a launch{}
-        // body synchronously up through its first suspension point when already on the
-        // main thread, so starting this any earlier risks its first (unconditional, see
+        // Started last, once everything it might touch (webServer constructed) already
+        // exists -- Dispatchers.Main.immediate can run a launch{} body synchronously up
+        // through its first suspension point when already on the main thread, so
+        // starting this any earlier risks its first (unconditional, see
         // startSettingsEffectsCollector) effects pass running against a half-built service.
         startSettingsEffectsCollector()
     }
@@ -233,7 +227,6 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
                 if (first || prev.verticalFlipEnabled != curr.verticalFlipEnabled) applyVerticalFlip()
                 if (first || prev.zoomLevel != curr.zoomLevel) applyZoom()
                 if (first || prev.bitrateKbps != curr.bitrateKbps) applyBitrate()
-                if (first || prev.showPreview != curr.showPreview) updateOverlaySize()
                 if (first || prev.authEnabled != curr.authEnabled ||
                     prev.authUsername != curr.authUsername || prev.authPassword != curr.authPassword
                 ) {
@@ -292,9 +285,9 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
             android.content.pm.PackageManager.PERMISSION_GRANTED
 
     private fun takeSnapshot() {
-        if (!isSurfaceCreated || !overlayWindow.glView.holder.surface.isValid) return
+        if (!isCameraStreaming) return
         try {
-            overlayWindow.glView.takePhoto { bitmap ->
+            cameraOrNull?.glInterface?.takePhoto { bitmap ->
                 val stream = ByteArrayOutputStream()
                 bitmap.compress(Bitmap.CompressFormat.JPEG, 50, stream)
                 val jpeg = stream.toByteArray()
@@ -324,12 +317,10 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
 
         // Initialize wrapper if needed
         if (!::rtspServerCamera.isInitialized) {
-             rtspServerCamera = RtspServerCamera2(overlayWindow.glView, this, 8554)
+             rtspServerCamera = RtspServerCamera2(this, this, 8554)
         }
 
-        if (isSurfaceCreated) {
-            startStream()
-        }
+        startStream()
 
         // Apply flashlight, night mode, vertical flip and zoom after stream starts
         serviceScope.launch {
@@ -344,13 +335,11 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
     }
 
     private fun startStream() {
-        if (!isSurfaceCreated || !overlayWindow.glView.holder.surface.isValid) return
-        
         try {
             if (!::rtspServerCamera.isInitialized) {
-                rtspServerCamera = RtspServerCamera2(overlayWindow.glView, this, 8554)
+                rtspServerCamera = RtspServerCamera2(this, this, 8554)
             }
-            
+
             if (!rtspServerCamera.isStreaming) {
                 val maxRes = getMaxCameraResolution()
                 if (settings.videoWidth <= 0 || settings.videoHeight <= 0 ||
@@ -529,9 +518,27 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
         }
     }
 
+    /**
+     * Rotates the raw camera texture 180 degrees for an upside-down mount.
+     *
+     * Earlier attempts used `GlInterface.setIsStream{Horizontal,Vertical}Flip`, which
+     * flip at the final screen composite -- *after* filters (including the timestamp
+     * overlay) are drawn -- so the burned-in text got flipped/mirrored along with the
+     * image (confirmed on a real device, through two different wrong fixes). `setRotation`
+     * instead reaches `MainRender.setCameraRotation` -> `cameraRender.setRotation`, the
+     * same pre-filter stage `OpenGlView.setCameraFlip` used to touch, so anything drawn by
+     * a filter afterward is composited onto an already-corrected frame and needs no
+     * compensation of its own.
+     *
+     * `startStream()` always calls `prepareVideo(..., rotation = 0)`, which
+     * `Camera2Base.prepareGlView` maps to `glInterface.setRotation(270)` for portrait
+     * capture (`rotation == 0 ? 270 : rotation - 90`, decompiled from RootEncoder 2.7.2).
+     * This overrides that with the same value plus 180 (mod 360) instead of guessing at
+     * a "flip" independently of that mapping.
+     */
     private fun applyVerticalFlip() {
         try {
-            overlayWindow.setVerticalFlip(settings.verticalFlipEnabled)
+            cameraOrNull?.glInterface?.setRotation(if (settings.verticalFlipEnabled) 90 else 270)
         } catch (e: Exception) {
             Log.e(TAG, "Failed to set vertical flip", e)
         }
@@ -604,24 +611,6 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
         }
     }
 
-    override fun surfaceCreated(holder: SurfaceHolder) {
-        isSurfaceCreated = true
-        startStream()
-    }
-
-    override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
-        if (cameraOrNull?.isStreaming == false) {
-             startStream()
-        }
-    }
-
-    override fun surfaceDestroyed(holder: SurfaceHolder) {
-        isSurfaceCreated = false
-        if (isCameraStreaming) {
-            stopStreamAndRecording()
-        }
-    }
-
     override fun onDestroy() {
         super.onDestroy()
         serviceScope.cancel()
@@ -637,16 +626,10 @@ class CctvServerService : Service(), ConnectChecker, SurfaceHolder.Callback {
         } catch (e: Exception) {
             e.printStackTrace()
         }
-        
-        overlayWindow.detach()
 
         // STOP_FOREGROUND_REMOVE needs API 24; the boolean overload covers API 23 too.
         @Suppress("DEPRECATION")
         stopForeground(true)
-    }
-
-    private fun updateOverlaySize() {
-        overlayWindow.setPreviewVisible(settings.showPreview)
     }
 
     /**

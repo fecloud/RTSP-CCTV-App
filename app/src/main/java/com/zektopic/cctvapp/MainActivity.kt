@@ -149,9 +149,6 @@ class MainActivity : AppCompatActivity() {
             .let { if (it >= 0) it else bitrateKbpsValues.indexOf(AppPreferences.DEFAULT_BITRATE_KBPS) }
         (binding.spinnerBitrate as? AutoCompleteTextView)?.setText(bitrateLabels[savedBitrateIndex], false)
 
-        // Load saved toggles
-        binding.switchPreview.isChecked = s.showPreview
-
         // Load saved auth settings
         binding.switchAuth.isChecked = s.authEnabled
         binding.editUsername.setText(s.authUsername)
@@ -198,8 +195,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     // startServer() decides the resulting state itself, because it can refuse (missing
-    // overlay or camera permission). The listener must not assert `true` afterwards or
-    // it overwrites that refusal and leaves the switch on with no service behind it.
+    // camera permission). The listener must not assert `true` afterwards or it overwrites
+    // that refusal and leaves the switch on with no service behind it.
     private val serverSwitchListener =
         android.widget.CompoundButton.OnCheckedChangeListener { _, isChecked ->
             if (isChecked) {
@@ -217,10 +214,6 @@ class MainActivity : AppCompatActivity() {
             if (binding.switchServer.isChecked) {
                 sendServiceAction("ACTION_SWITCH_CAMERA")
             }
-        }
-
-        binding.switchPreview.setOnCheckedChangeListener { _, isChecked ->
-            SettingsRepository.update(this) { it.copy(showPreview = isChecked) }
         }
 
         (binding.spinnerResolution as? AutoCompleteTextView)?.setOnItemClickListener { _, _, position, _ ->
@@ -396,17 +389,6 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        if (!Settings.canDrawOverlays(this)) {
-            val intent = Intent(
-                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                Uri.parse("package:$packageName")
-            )
-            startActivity(intent)
-            updateServerStatus(false)
-            Toast.makeText(this, R.string.overlay_permission_toast, Toast.LENGTH_LONG).show()
-            return
-        }
-
         if (!isIgnoringBatteryOptimizations()) {
             val intent = Intent(
                 Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
@@ -566,7 +548,7 @@ class MainActivity : AppCompatActivity() {
     private fun autoStartServerIfNeeded() {
         if (!AppPreferences.getAutoStartOnLaunch(this)) return
         if (binding.switchServer.isChecked) return
-        if (!allPermissionsGranted() || !Settings.canDrawOverlays(this) || !isIgnoringBatteryOptimizations()) return
+        if (!allPermissionsGranted() || !isIgnoringBatteryOptimizations()) return
         binding.switchServer.isChecked = true
     }
 

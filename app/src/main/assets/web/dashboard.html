@@ -447,13 +447,6 @@
                     </select>
                 </div>
             </div>
-            <div class="setting-row">
-                <span class="setting-label">Show Preview</span>
-                <label class="toggle">
-                    <input type="checkbox" id="togglePreview" onchange="setSetting('show_preview', this.checked)">
-                    <span class="toggle-track"></span>
-                </label>
-            </div>
         </div>
 
         <!-- Overlay Settings -->
@@ -735,7 +728,6 @@
                     document.getElementById('resSelect').value = data.resolution;
                     
                     // Sync toggles
-                    document.getElementById('togglePreview').checked = data.showPreview;
                     document.getElementById('toggleTimestamp').checked = data.showTimestamp;
                     document.getElementById('posSelect').value = data.timestampPosition;
                     document.getElementById('sizeSelect').value = data.timestampSize;

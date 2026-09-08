@@ -17,7 +17,6 @@ object AppPreferences {
     private const val KEY_VIDEO_CODEC = "video_codec"
     private const val KEY_VIDEO_WIDTH = "video_width"
     private const val KEY_VIDEO_HEIGHT = "video_height"
-    private const val KEY_SHOW_PREVIEW = "show_preview"
 
     private fun prefs(context: Context): SharedPreferences {
         return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -43,14 +42,6 @@ object AppPreferences {
             putInt(KEY_VIDEO_WIDTH, width)
                 .putInt(KEY_VIDEO_HEIGHT, height)
         }
-    }
-
-    // --- Show Preview ---
-    fun getShowPreview(context: Context): Boolean =
-        prefs(context).getBoolean(KEY_SHOW_PREVIEW, false)
-
-    fun setShowPreview(context: Context, show: Boolean) {
-        prefs(context).edit { putBoolean(KEY_SHOW_PREVIEW, show) }
     }
 
     // --- RTSP Authentication ---

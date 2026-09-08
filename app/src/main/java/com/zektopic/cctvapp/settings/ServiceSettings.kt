@@ -22,7 +22,6 @@ data class ServiceSettings(
      * show the truth without destroying the user's stored preference.
      */
     val activeCodec: String = "H264",
-    val showPreview: Boolean = false,
     val authEnabled: Boolean = false,
     val authUsername: String = "",
     val authPassword: String = "",
@@ -50,7 +49,6 @@ data class ServiceSettings(
             videoCodec = AppPreferences.getVideoCodec(context),
             videoWidth = AppPreferences.getVideoWidth(context),
             videoHeight = AppPreferences.getVideoHeight(context),
-            showPreview = AppPreferences.getShowPreview(context),
             authEnabled = AppPreferences.getAuthEnabled(context),
             authUsername = AppPreferences.getUsername(context),
             authPassword = AppPreferences.getPassword(context),

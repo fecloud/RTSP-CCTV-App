@@ -55,10 +55,6 @@ class SettingUpdateHandler(private val context: Context) {
                     SettingsRepository.update(context) { it.copy(bitrateKbps = coerced) }
                 }
             }
-            "show_preview" -> {
-                val enabled = value.toBoolean()
-                SettingsRepository.update(context) { it.copy(showPreview = enabled) }
-            }
             "audio_enabled" -> {
                 val enabled = value.toBoolean()
                 SettingsRepository.update(context) { it.copy(audioEnabled = enabled) }

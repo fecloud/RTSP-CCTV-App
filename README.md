@@ -104,8 +104,7 @@ automatically when nobody is watching.
 
 1. **Install** the APK from [Releases](https://github.com/Zektopic/RSTP-CCTV-App/releases),
    or [build it yourself](#building-from-source).
-2. **Grant permissions** on first launch — Camera, and *Display over other apps*
-   (required to keep the camera surface alive in the background). Notifications and
+2. **Grant permissions** on first launch — Camera is required. Notifications and
    Microphone are optional.
 3. **Note the generated dashboard password.** On first run the app creates a random
    password for the web dashboard and shows it to you once. It is also visible any time
@@ -228,10 +227,9 @@ cross-origin `Origin` header are rejected with `403`.
 | `timestamp_size` | `Small` \| `Medium` \| `Large` | Overlay text size |
 | `flashlight_enabled` | bool | Torch |
 | `night_mode_enabled` | bool | Automatic torch by ambient light |
-| `vertical_flip_enabled` | bool | Flip preview/stream/snapshot for an upside-down mount |
+| `vertical_flip_enabled` | bool | Flip stream/snapshot for an upside-down mount |
 | `zoom_level` | float 1.0–8.0 | Camera digital zoom factor |
 | `bitrate_kbps` | int 500–8000 | Video bitrate, applied live while streaming |
-| `show_preview` | bool | On-device preview overlay |
 | `audio_enabled` | bool | Include microphone audio in the stream |
 | `web_auth_enabled` | bool | Require authentication on port 8081 |
 | `record_to_gallery_enabled` | bool | Record rotating segments to `Movies/CCTVApp` in the gallery |
@@ -246,7 +244,6 @@ cross-origin `Origin` header are rejected with `403`.
 | Permission | Required | Why |
 |---|---|---|
 | `CAMERA` | **Yes** | Capturing video. Without it the server will not start. |
-| `SYSTEM_ALERT_WINDOW` | **Yes** | The camera renders into an off-screen overlay surface, which is what keeps encoding alive when the app is not in the foreground. |
 | `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` | **Yes** | Starting the server also asks to be exempted from battery optimization — without it, OEM battery management is free to kill the camera in the background. |
 | `INTERNET`, `ACCESS_NETWORK_STATE` | Yes | Running the local RTSP and HTTP servers, and reporting the device IP. |
 | `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_CAMERA` | Yes | Long-running capture. |
@@ -315,9 +312,7 @@ manually — not on every commit to `master`.
 <details>
 <summary><b>The server will not start</b></summary>
 
-Check that both Camera and *Display over other apps* are granted. The overlay permission
-is not a normal runtime permission — it has to be enabled from
-Settings → Apps → RTSP CCTV App → Display over other apps.
+Check that the Camera permission is granted.
 </details>
 
 <details>

@@ -13,12 +13,11 @@
     <!-- Required whenever audio capture is enabled: Android 14+ throws SecurityException
          if a foreground service uses the microphone without declaring this type. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
-    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <!-- API 33+: without this the foreground-service notification is suppressed. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- Lets the app ask to be exempted from battery optimization. A camera that OEM
          battery management is free to suspend in the background is not a reliable
-         camera, so this is treated as a hard requirement, like the overlay permission. -->
+         camera, so this is treated as a hard requirement. -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <!-- Only needed on Android 9 and below with gallery recording on: API 29+ writes its
          own MediaStore rows via scoped storage without any permission at all. -->

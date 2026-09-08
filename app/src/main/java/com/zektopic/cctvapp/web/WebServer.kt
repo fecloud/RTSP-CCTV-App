@@ -173,7 +173,6 @@ class WebServer(
                 "zoomMin":${getZoomRange().first},
                 "zoomMax":${getZoomRange().second},
                 "bitrateKbps":${s.bitrateKbps},
-                "showPreview":${s.showPreview},
                 "batteryLevel":${DeviceStatsUtil.getBatteryLevel(context)},
                 "isCharging":${DeviceStatsUtil.isCharging(context)},
                 "wifiStrength":${DeviceStatsUtil.getWifiStrength(context)},

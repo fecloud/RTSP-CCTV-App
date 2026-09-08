@@ -41,7 +41,7 @@ to be one flat package, but it grew past the point that stayed readable):
 | Package | Files | Responsibility |
 |---|---|---|
 | *(root)* | `MainActivity.kt`, `BootReceiver.kt`, `CctvApplication.kt` | App entry points — the components Android launches by class name, plus process-wide init (Bugly, `AppLog`) in `CctvApplication.onCreate` |
-| `.service` | `CctvServerService.kt`, `GalleryRecordingManager.kt`, `OverlayWindow.kt`, `ServiceNotificationUtil.kt` | The foreground service: camera/encoder/stream lifecycle, gallery recording, the overlay window, the notification |
+| `.service` | `CctvServerService.kt`, `GalleryRecordingManager.kt`, `ServiceNotificationUtil.kt` | The foreground service: camera/encoder/stream lifecycle, gallery recording, the notification |
 | `.settings` | `AppPreferences.kt`, `ServiceSettings.kt`, `SettingsRepository.kt`, `SettingEffects.kt`, `SettingUpdateHandler.kt` | Settings persistence and the shared in-memory data source (see "Settings: one shared data source" below) |
 | `.web` | `WebServer.kt`, `WebAuth.kt` | NanoHTTPD dashboard server + HTTP Basic auth |
 | `.camera` | `CameraResolutionUtil.kt` | Camera2 supported-resolution querying, shared by the service, `GalleryRecordingManager`, and `MainActivity` |
@@ -65,9 +65,9 @@ stream itself comes straight off the hardware encoder via `RtspServerCamera2`
 
 ### Threading rules
 
-`WebServer` callbacks arrive on NanoHTTPD worker threads, but the camera/overlay view
-can only be touched from the main thread (`updateViewLayout` throws otherwise).
-`CctvServerService.onMain { ... }` posts a block onto `serviceScope`
+`WebServer` callbacks arrive on NanoHTTPD worker threads; `CctvServerService` serializes
+its camera calls onto the main thread out of caution rather than a documented
+requirement. `CctvServerService.onMain { ... }` posts a block onto `serviceScope`
 (`Dispatchers.Main.immediate`) to enforce that — launched from the main thread it runs
 synchronously (no dispatch), launched from a worker thread it posts to the main looper.
 Every periodic/delayed loop in the service (the snapshot loop, the timestamp ticker, the

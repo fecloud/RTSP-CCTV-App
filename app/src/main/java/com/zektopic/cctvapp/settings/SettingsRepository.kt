@@ -48,7 +48,6 @@ object SettingsRepository {
     private fun persist(context: Context, s: ServiceSettings) {
         AppPreferences.setVideoCodec(context, s.videoCodec)
         AppPreferences.setResolution(context, s.videoWidth, s.videoHeight)
-        AppPreferences.setShowPreview(context, s.showPreview)
         AppPreferences.setAuthEnabled(context, s.authEnabled)
         AppPreferences.setUsername(context, s.authUsername)
         AppPreferences.setPassword(context, s.authPassword)
