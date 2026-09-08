@@ -92,6 +92,9 @@ class CctvServerService : Service(), ConnectChecker {
     /** Ticks [updateTimestampText] every second while the timestamp overlay is enabled. */
     private var timestampJob: Job? = null
 
+    /** Runs [startSnapshotLoop]'s loop only while the camera is actually streaming. */
+    private var snapshotJob: Job? = null
+
     private fun startTimestampTicker() {
         timestampJob?.cancel()
         timestampJob = serviceScope.launch {
@@ -107,20 +110,30 @@ class CctvServerService : Service(), ConnectChecker {
         timestampJob = null
     }
 
+    /**
+     * Only runs while the camera is streaming -- there is nothing to snapshot otherwise,
+     * so polling on a timer while stopped (previously done for the service's entire
+     * lifetime, since [stopStreamAndRecording] does not stop the service itself) was a
+     * pure waste of wakeups. Started from [publishStreamingStatus], stopped from
+     * [stopStreamAndRecording].
+     */
     private fun startSnapshotLoop() {
-        serviceScope.launch {
+        snapshotJob?.cancel()
+        snapshotJob = serviceScope.launch {
             while (isActive) {
-                val streaming = isCameraStreaming
-
                 val viewerActive =
                     System.currentTimeMillis() - CameraRuntimeBus.lastSnapshotRequestMs < VIEWER_IDLE_TIMEOUT_MS
-                val wanted = streaming && viewerActive
 
-                if (wanted) takeSnapshot()
+                if (viewerActive) takeSnapshot()
 
-                delay((if (wanted) ACTIVE_SNAPSHOT_INTERVAL_MS else IDLE_SNAPSHOT_INTERVAL_MS).milliseconds)
+                delay((if (viewerActive) ACTIVE_SNAPSHOT_INTERVAL_MS else IDLE_SNAPSHOT_INTERVAL_MS).milliseconds)
             }
         }
+    }
+
+    private fun stopSnapshotLoop() {
+        snapshotJob?.cancel()
+        snapshotJob = null
     }
 
     /** Owned by this service alone -- constructed on first use, torn down in [onDestroy]. */
@@ -150,8 +163,6 @@ class CctvServerService : Service(), ConnectChecker {
         // Setup light sensor for night mode
         sensorManager = getSystemService(SENSOR_SERVICE) as SensorManager
         lightSensor = sensorManager?.getDefaultSensor(Sensor.TYPE_LIGHT)
-
-        startSnapshotLoop()
 
         // Started last, once everything they might touch already exists --
         // Dispatchers.Main.immediate can run a launch{} body synchronously up through its
@@ -268,6 +279,7 @@ class CctvServerService : Service(), ConnectChecker {
         // now-torn-down session every second until the stream restarts.
         // applyTimestampOverlay() recreates both from scratch on the next start.
         stopTimestampTicker()
+        stopSnapshotLoop()
         textFilter = null
         ServiceStateRepository.updateRuntime { it.copy(isStreaming = false) }
     }
@@ -277,6 +289,7 @@ class CctvServerService : Service(), ConnectChecker {
         val range = rtspServerCamera.zoomRange
         ServiceStateRepository.updateSettings(this) { it.copy(activeCodec = activeCodec) }
         ServiceStateRepository.updateRuntime { it.copy(isStreaming = true, zoomRange = range.lower to range.upper) }
+        startSnapshotLoop()
     }
 
     private fun startGalleryRecordingIfNeeded() = galleryRecordingManager.startIfNeeded()
