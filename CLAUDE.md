@@ -40,7 +40,7 @@ to be one flat package, but it grew past the point that stayed readable):
 
 | Package | Files | Responsibility |
 |---|---|---|
-| *(root)* | `MainActivity.kt`, `BootReceiver.kt`, `CctvApplication.kt` | App entry points — the components Android launches by class name, plus process-wide init (Bugly, `AppLog`) in `CctvApplication.onCreate` |
+| *(root)* | `MainActivity.kt`, `CctvApplication.kt` | App entry points — the components Android launches by class name, plus process-wide init (Bugly, `AppLog`, the always-on `WebServer`) in `CctvApplication.onCreate` |
 | `.service` | `CctvServerService.kt`, `GalleryRecordingManager.kt`, `ServiceNotificationUtil.kt` | The foreground service: camera/encoder/stream lifecycle, gallery recording, the notification |
 | `.settings` | `AppPreferences.kt`, `ServiceSettings.kt`, `SettingsRepository.kt`, `SettingEffects.kt`, `SettingUpdateHandler.kt` | Settings persistence and the shared in-memory data source (see "Settings: one shared data source" below) |
 | `.web` | `WebServer.kt`, `WebAuth.kt` | NanoHTTPD dashboard server + HTTP Basic auth |
@@ -94,8 +94,9 @@ fire on the collector's first observed emission, to avoid a redundant restart ri
 a cold start) are deliberately handled with different rules.
 
 Because of this, starting/restarting the service (`MainActivity.ensureServiceStarted`,
-`BootReceiver`) sends a **bare** `Intent` with no extras — `CctvServerService.onCreate`
-loads current settings itself via `SettingsRepository.ensureLoaded`. When adding a new
+`CctvApplication.startServiceRemotely`) sends a **bare** `Intent` with no extras —
+`CctvServerService.onCreate` loads current settings itself via
+`SettingsRepository.ensureLoaded`. When adding a new
 setting: add the field to `ServiceSettings`, persist it in
 `SettingsRepository.persist`, read/write it from `MainActivity` and
 `SettingUpdateHandler`, and (if it should do something) add its diff check to

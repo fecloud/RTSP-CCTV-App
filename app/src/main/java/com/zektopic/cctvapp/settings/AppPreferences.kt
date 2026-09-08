@@ -223,16 +223,7 @@ object AppPreferences {
     }
 
     // --- Startup behaviour ---
-    private const val KEY_START_ON_BOOT = "start_on_boot"
     private const val KEY_AUTO_START_ON_LAUNCH = "auto_start_on_launch"
-
-    /** Off by default: a camera server should not silently start itself after a reboot. */
-    fun getStartOnBoot(context: Context): Boolean =
-        prefs(context).getBoolean(KEY_START_ON_BOOT, false)
-
-    fun setStartOnBoot(context: Context, enabled: Boolean) {
-        prefs(context).edit { putBoolean(KEY_START_ON_BOOT, enabled) }
-    }
 
     /** Off by default: opening the app should not immediately begin streaming. */
     fun getAutoStartOnLaunch(context: Context): Boolean =

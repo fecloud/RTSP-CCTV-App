@@ -151,7 +151,6 @@ This app puts a camera on your network. The defaults are chosen accordingly.
 | Cross-origin requests | **Rejected** | Stops a website you visit from driving the camera over your LAN. |
 | Credentials in cloud backup | **Excluded** | Preferences and snapshots are excluded from Auto Backup and device transfer. |
 | Audio capture | **Off** | The microphone is only claimed when you enable it. |
-| Start on boot | **Off** | Opt-in. |
 | Start when app opens | **Off** | Opt-in. Opening the app no longer starts streaming by itself. |
 
 ### What you should still do
@@ -249,7 +248,6 @@ cross-origin `Origin` header are rejected with `403`.
 | `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_CAMERA` | Yes | Long-running capture. |
 | `RECORD_AUDIO`, `FOREGROUND_SERVICE_MICROPHONE` | Only with audio on | Audio is opt-in; the microphone type is only claimed when you enable it. |
 | `POST_NOTIFICATIONS` | Recommended | Android 13+. Without it the service notification is suppressed and you lose the visible indicator that the camera is live. |
-| `RECEIVE_BOOT_COMPLETED` | Only with start-on-boot | Restarting after a reboot. |
 | `ACCESS_WIFI_STATE` | Optional | Wi-Fi signal readout on the dashboard. |
 | `WRITE_EXTERNAL_STORAGE` | Only on Android 9 and below, with gallery recording on | Writing video segments to the gallery pre-scoped-storage. Not needed on Android 10+, where the app writes its own `MediaStore` rows without any permission. |
 
@@ -340,14 +338,6 @@ Toggling the server on already prompts you to exempt the app from battery optimi
 make sure you accepted that dialog. Some OEMs (worst on Xiaomi/MIUI, Huawei, Oppo and
 Samsung) still kill the camera in the background regardless; on Xiaomi also enable
 *Autostart*. See [dontkillmyapp.com](https://dontkillmyapp.com) for per-vendor steps.
-</details>
-
-<details>
-<summary><b>Start-on-boot does not work</b></summary>
-
-Android 14+ blocks background components from starting a camera foreground service. The
-app detects this and posts a *tap to resume* notification instead of crashing. Some OEMs
-block autostart outright regardless of the setting.
 </details>
 
 ---

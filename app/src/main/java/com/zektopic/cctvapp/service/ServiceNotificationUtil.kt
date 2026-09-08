@@ -11,19 +11,10 @@ import androidx.core.app.NotificationCompat
 import com.zektopic.cctvapp.MainActivity
 import com.zektopic.cctvapp.R
 
-/**
- * Shared notification channel/notification building for [CctvServerService] (the
- * persistent "server running" notification) and [BootReceiver] (the tap-to-resume
- * fallback notification posted when Android blocks a foreground-service start after
- * reboot). Both previously created their own copy of the same channel id -- with the
- * channel *name* drifting between them (one used the `notification_channel_name`
- * string resource, the other a hardcoded literal) -- so whichever ran first silently
- * won on real devices.
- */
+/** Notification channel/notification building for [CctvServerService]'s persistent "server running" notification. */
 object ServiceNotificationUtil {
     const val CHANNEL_ID = "CctvServerChannel"
     const val SERVER_NOTIFICATION_ID = 1
-    const val RESUME_NOTIFICATION_ID = 2
 
     fun createNotificationChannel(context: Context) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -60,24 +51,6 @@ object ServiceNotificationUtil {
             .setOngoing(true)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-            .build()
-    }
-
-    /** Tap-to-resume notification posted when a background-started foreground service was blocked. */
-    fun buildResumeNotification(context: Context): Notification {
-        val contentIntent = PendingIntent.getActivity(
-            context,
-            0,
-            Intent(context, MainActivity::class.java),
-            PendingIntent.FLAG_IMMUTABLE
-        )
-
-        return NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_stat_cctv)
-            .setContentTitle(context.getString(R.string.boot_resume_title))
-            .setContentText(context.getString(R.string.boot_resume_text))
-            .setContentIntent(contentIntent)
-            .setAutoCancel(true)
             .build()
     }
 }

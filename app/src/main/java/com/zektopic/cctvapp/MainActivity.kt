@@ -177,7 +177,6 @@ class MainActivity : AppCompatActivity() {
 
         // Startup behavior flags aren't part of ServiceSettings -- the service never
         // reads them, so they stay direct AppPreferences reads.
-        binding.switchStartOnBoot.isChecked = AppPreferences.getStartOnBoot(this)
         binding.switchAutoStart.isChecked = AppPreferences.getAutoStartOnLaunch(this)
 
         // Load saved recording settings
@@ -298,10 +297,6 @@ class MainActivity : AppCompatActivity() {
 
         binding.switchAudio.setOnCheckedChangeListener { _, isChecked ->
             SettingsRepository.update(this) { it.copy(audioEnabled = isChecked) }
-        }
-
-        binding.switchStartOnBoot.setOnCheckedChangeListener { _, isChecked ->
-            AppPreferences.setStartOnBoot(this, isChecked)
         }
 
         binding.switchAutoStart.setOnCheckedChangeListener { _, isChecked ->
