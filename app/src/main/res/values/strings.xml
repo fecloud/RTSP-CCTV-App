@@ -59,7 +59,6 @@
     <string name="notification_channel_name">CCTV Server</string>
     <string name="notification_title">CCTV Server running</string>
     <string name="notification_text">Camera is streaming on this device</string>
-    <string name="notification_stop">Stop server</string>
 
     <!-- Security -->
     <string name="section_security">Security</string>

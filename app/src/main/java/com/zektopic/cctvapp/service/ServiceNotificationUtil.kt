@@ -27,18 +27,12 @@ object ServiceNotificationUtil {
         }
     }
 
-    /** The persistent "server is running" notification, with a Stop action. */
+    /** The persistent "server is running" notification. */
     fun buildServerNotification(context: Context): Notification {
         val contentIntent = PendingIntent.getActivity(
             context,
             0,
             Intent(context, MainActivity::class.java),
-            PendingIntent.FLAG_IMMUTABLE
-        )
-        val stopIntent = PendingIntent.getService(
-            context,
-            1,
-            Intent(context, CctvServerService::class.java).setAction(CctvServerService.ACTION_STOP_SERVER),
             PendingIntent.FLAG_IMMUTABLE
         )
 
@@ -47,7 +41,6 @@ object ServiceNotificationUtil {
             .setContentTitle(context.getString(R.string.notification_title))
             .setContentText(context.getString(R.string.notification_text))
             .setContentIntent(contentIntent)
-            .addAction(0, context.getString(R.string.notification_stop), stopIntent)
             .setOngoing(true)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)

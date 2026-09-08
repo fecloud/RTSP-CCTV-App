@@ -51,7 +51,7 @@ NVR can consume, and keeps every frame on your own network.
 
 ### Streaming
 - **RTSP server** on port `8554`, low latency over Wi-Fi
-- **Hardware-accelerated codecs** — H.264, H.265 (HEVC), AV1, with automatic fallback to
+- **Hardware-accelerated codecs** — H.264, H.265 (HEVC), with automatic fallback to
   H.264 when the selected codec cannot be prepared
 - **Resolutions** from 640×480 up to the camera's maximum (capped at 4K to stay within
   encoder limits)
@@ -77,7 +77,7 @@ NVR can consume, and keeps every frame on your own network.
 
 ```mermaid
 flowchart LR
-    CAM[Camera2 + OpenGL surface] --> ENC[Hardware encoder<br/>H.264 / H.265 / AV1]
+    CAM[Camera2 + OpenGL surface] --> ENC[Hardware encoder<br/>H.264 / H.265]
     CAM --> SNAP[JPEG snapshot loop<br/>throttled when idle]
 
     ENC --> RTSP[RTSP server<br/>:8554]
@@ -211,7 +211,7 @@ cross-origin `Origin` header are rejected with `403`.
 |---|---|
 | `POST /action/toggle-stream` | — |
 | `POST /action/switch-camera` | — |
-| `POST /action/set-codec` | `codec=H264\|H265\|AV1` |
+| `POST /action/set-codec` | `codec=H264\|H265` |
 | `POST /action/set-resolution` | `w=<int>&h=<int>` |
 | `POST /action/set-setting` | `key=<key>&value=<value>` |
 | `POST /action/set-auth` | `enabled=<bool>&username=<s>&password=<s>` |
@@ -318,7 +318,7 @@ Check that the Camera permission is granted.
 
 - Confirm the phone and the client are on the same network and the network is not using
   AP isolation (common on guest Wi-Fi).
-- Try 640×480 with H.264 first — some devices cannot prepare H.265 or AV1 at high
+- Try 640×480 with H.264 first — some devices cannot prepare H.265 at high
   resolutions, and the app falls back to H.264 when preparation fails.
 - Check the notification is present; if it is gone, the OS killed the service.
 </details>

@@ -78,7 +78,7 @@ class MainActivity : AppCompatActivity() {
     // Populated in onCreate() from the camera's actual supported sizes; this is only
     // the fallback used if that query comes back empty.
     private var resolutions: List<String> = DEFAULT_RESOLUTIONS
-    private val codecs = arrayOf("H264", "H265", "AV1")
+    private val codecs = arrayOf("H264", "H265")
     private val overlayPositions = arrayOf("Top Left", "Top Right", "Bottom Left", "Bottom Right")
     private val overlaySizes = arrayOf("Small", "Medium", "Large")
     private val bitrateLabels = arrayOf("500 Kbps", "1 Mbps", "2 Mbps", "4 Mbps", "6 Mbps", "8 Mbps")

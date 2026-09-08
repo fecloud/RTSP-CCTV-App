@@ -1,7 +1,9 @@
 package com.zektopic.cctvapp.service
 
+import android.Manifest
 import android.app.Service
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.graphics.Bitmap
 import android.graphics.Color
@@ -12,6 +14,7 @@ import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.os.Build
 import android.os.IBinder
+import androidx.core.content.ContextCompat
 import com.zektopic.cctvapp.log.AppLog as Log
 import com.pedro.common.ConnectChecker
 import com.pedro.common.VideoCodec
@@ -41,7 +44,6 @@ class CctvServerService : Service(), ConnectChecker {
 
     companion object {
         private const val TAG = "CctvServerService"
-        const val ACTION_STOP_SERVER = "ACTION_STOP_SERVER"
 
         /** Capture cadence while the dashboard is open. */
         private const val ACTIVE_SNAPSHOT_INTERVAL_MS = 500L
@@ -95,6 +97,33 @@ class CctvServerService : Service(), ConnectChecker {
     /** Runs [startSnapshotLoop]'s loop only while the camera is actually streaming. */
     private var snapshotJob: Job? = null
 
+    /** Owned by this service alone -- constructed on first use, torn down in [onDestroy]. */
+    private val galleryRecordingManager by lazy {
+        GalleryRecordingManager(
+            context = this,
+            onMain = ::onMain,
+            camera = { cameraOrNull },
+            recordToGalleryEnabled = { settings.recordToGalleryEnabled },
+            recordSegmentMinutes = { settings.recordSegmentMinutes },
+            recordStorageThresholdPercent = { settings.recordStorageThresholdPercent }
+        )
+    }
+
+    private val lightSensorListener = object : SensorEventListener {
+        override fun onSensorChanged(event: SensorEvent?) {
+            if (!settings.nightModeEnabled) return
+            val lux = event?.values?.get(0) ?: return
+            val shouldEnableFlash = lux < 10f
+            if (shouldEnableFlash != isLanternOn) {
+                ServiceStateRepository.updateSettings(this@CctvServerService) { it.copy(flashlightEnabled = shouldEnableFlash) }
+                applyFlashlight()
+                Log.d(TAG, "Night mode: lux=$lux, flash=${if (shouldEnableFlash) "ON" else "OFF"}")
+            }
+        }
+
+        override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
+    }
+
     private fun startTimestampTicker() {
         timestampJob?.cancel()
         timestampJob = serviceScope.launch {
@@ -134,18 +163,6 @@ class CctvServerService : Service(), ConnectChecker {
     private fun stopSnapshotLoop() {
         snapshotJob?.cancel()
         snapshotJob = null
-    }
-
-    /** Owned by this service alone -- constructed on first use, torn down in [onDestroy]. */
-    private val galleryRecordingManager by lazy {
-        GalleryRecordingManager(
-            context = this,
-            onMain = ::onMain,
-            camera = { cameraOrNull },
-            recordToGalleryEnabled = { settings.recordToGalleryEnabled },
-            recordSegmentMinutes = { settings.recordSegmentMinutes },
-            recordStorageThresholdPercent = { settings.recordStorageThresholdPercent }
-        )
     }
 
     override fun onBind(intent: Intent?): IBinder? {
@@ -208,7 +225,7 @@ class CctvServerService : Service(), ConnectChecker {
                     restartStreamIfRunning()
                 }
                 if (!first && prev.recordToGalleryEnabled != curr.recordToGalleryEnabled) {
-                    if (curr.recordToGalleryEnabled) startGalleryRecordingIfNeeded() else stopGalleryRecording()
+                    if (curr.recordToGalleryEnabled) galleryRecordingManager.startIfNeeded() else galleryRecordingManager.stop()
                 }
             }
         }
@@ -292,14 +309,6 @@ class CctvServerService : Service(), ConnectChecker {
         startSnapshotLoop()
     }
 
-    private fun startGalleryRecordingIfNeeded() = galleryRecordingManager.startIfNeeded()
-
-    private fun stopGalleryRecording() = galleryRecordingManager.stop()
-
-    private fun hasPermission(permission: String) =
-        androidx.core.content.ContextCompat.checkSelfPermission(this, permission) ==
-            android.content.pm.PackageManager.PERMISSION_GRANTED
-
     private fun takeSnapshot() {
         if (!isCameraStreaming) return
         try {
@@ -315,11 +324,6 @@ class CctvServerService : Service(), ConnectChecker {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == ACTION_STOP_SERVER) {
-            stopSelf()
-            return START_NOT_STICKY
-        }
-
         applyForegroundServiceType()
 
         // Initialize wrapper if needed
@@ -363,7 +367,10 @@ class CctvServerService : Service(), ConnectChecker {
 
                 // Audio is opt-in. Recording it forces the microphone foreground-service
                 // type and the RECORD_AUDIO grant; a camera-only stream needs neither.
-                if (settings.audioEnabled && hasPermission(android.Manifest.permission.RECORD_AUDIO)) {
+                if (settings.audioEnabled &&
+                    ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) ==
+                        PackageManager.PERMISSION_GRANTED
+                ) {
                     rtspServerCamera.prepareAudio(64 * 1024, 44100, true, false, false)
                 } else {
                     rtspServerCamera.disableAudio()
@@ -372,9 +379,8 @@ class CctvServerService : Service(), ConnectChecker {
                 // Check and set Codec
                 val selectedCodec = when (settings.videoCodec) {
                     "H265" -> VideoCodec.H265
-                    "AV1" -> VideoCodec.AV1
-                    // "VP9" was offered in both UIs but silently fell back to H.264.
-                    // It is gone from the pickers; this branch only catches stale prefs.
+                    // "VP9" and "AV1" were offered in both UIs but are now gone from the
+                    // pickers; this branch only catches stale prefs, falling back to H.264.
                     else -> VideoCodec.H264
                 }
                 
@@ -571,21 +577,6 @@ class CctvServerService : Service(), ConnectChecker {
         } catch (e: Exception) {
             Log.e(TAG, "Failed to set bitrate", e)
         }
-    }
-
-    private val lightSensorListener = object : SensorEventListener {
-        override fun onSensorChanged(event: SensorEvent?) {
-            if (!settings.nightModeEnabled) return
-            val lux = event?.values?.get(0) ?: return
-            val shouldEnableFlash = lux < 10f
-            if (shouldEnableFlash != isLanternOn) {
-                ServiceStateRepository.updateSettings(this@CctvServerService) { it.copy(flashlightEnabled = shouldEnableFlash) }
-                applyFlashlight()
-                Log.d(TAG, "Night mode: lux=$lux, flash=${if (shouldEnableFlash) "ON" else "OFF"}")
-            }
-        }
-
-        override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
     }
 
     private fun updateNightModeSensor() {
