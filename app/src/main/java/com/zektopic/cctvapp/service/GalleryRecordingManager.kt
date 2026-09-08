@@ -118,6 +118,37 @@ class GalleryRecordingManager(
     }
 
     /**
+     * Call once from the service's onCreate, before any segment can start. Deletes rows
+     * matching [RecordingsGallery.orphanSelection] -- segments from a previous process that
+     * got killed (crash, OOM-kill, force-stop) before [finalizeCurrentSegment] or
+     * [discardGalleryEntry] ran, left with no recorded data. Without this they linger in
+     * `/recordings` forever as a permanent "0 B" entry.
+     */
+    fun cleanupOrphanedSegments() {
+        managerScope.launch(mediaStoreDispatcher) {
+            try {
+                val (selection, selectionArgs) = RecordingsGallery.orphanSelection()
+                val ids = mutableListOf<Long>()
+                context.contentResolver.query(
+                    MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+                    arrayOf(MediaStore.Video.Media._ID),
+                    selection, selectionArgs, null
+                )?.use { cursor ->
+                    val idIndex = cursor.getColumnIndexOrThrow(MediaStore.Video.Media._ID)
+                    while (cursor.moveToNext()) ids.add(cursor.getLong(idIndex))
+                }
+                for (id in ids) {
+                    val uri = android.content.ContentUris.withAppendedId(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, id)
+                    context.contentResolver.delete(uri, null, null)
+                }
+                if (ids.isNotEmpty()) Log.d(TAG, "Cleaned up ${ids.size} orphaned recording segment(s)")
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to clean up orphaned recording segments", e)
+            }
+        }
+    }
+
+    /**
      * One finished (or about-to-be-inserted) gallery segment. Exactly one of [pfd] / [path]
      * is set: scoped storage (API 29+) has no filesystem path and must write through a
      * MediaStore-opened [ParcelFileDescriptor]; pre-29 has a real [File] path and uses
@@ -307,7 +338,7 @@ class GalleryRecordingManager(
         try {
             val projection = arrayOf(MediaStore.Video.Media._ID)
             val sortOrder = "${MediaStore.Video.Media.DATE_ADDED} ASC"
-            val (selection, selectionArgs) = RecordingsGallery.selection(context)
+            val (selection, selectionArgs) = RecordingsGallery.selection()
 
             val ids = ArrayDeque<Long>()
             context.contentResolver.query(

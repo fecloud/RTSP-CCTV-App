@@ -174,6 +174,10 @@ class CctvServerService : Service(), ConnectChecker {
         // already did).
         ServiceStateRepository.ensureLoaded(this)
 
+        // Before any new segment can start: sweep away rows left by a segment the
+        // previous process never got to finish/discard (crash, OOM-kill, force-stop).
+        galleryRecordingManager.cleanupOrphanedSegments()
+
         // Setup light sensor for night mode
         sensorManager = getSystemService(SENSOR_SERVICE) as SensorManager
         lightSensor = sensorManager?.getDefaultSensor(Sensor.TYPE_LIGHT)

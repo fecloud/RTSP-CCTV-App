@@ -34,7 +34,7 @@ object RecordingsGallery {
                 MediaStore.Video.Media.DATE_ADDED
             )
             val sortOrder = "${MediaStore.Video.Media.DATE_ADDED} DESC"
-            val (selection, selectionArgs) = selection(context)
+            val (selection, selectionArgs) = selection()
             context.contentResolver.query(
                 MediaStore.Video.Media.EXTERNAL_CONTENT_URI, projection, selection, selectionArgs, sortOrder
             )?.use { cursor ->
@@ -66,7 +66,7 @@ object RecordingsGallery {
      */
     fun openRecordingStream(context: Context, id: Long): InputStream? {
         return try {
-            val (baseSelection, baseArgs) = selection(context)
+            val (baseSelection, baseArgs) = selection()
             val sel = "$baseSelection AND ${MediaStore.Video.Media._ID} = ?"
             val selectionArgs = baseArgs + id.toString()
             var found = false
@@ -86,13 +86,41 @@ object RecordingsGallery {
 
     /** Selects rows under [RECORDING_RELATIVE_PATH] -- shared by retention and listing. */
     @Suppress("DEPRECATION") // MediaStore.Video.Media.DATA / Environment.getExternalStoragePublicDirectory: pre-Q only path
-    fun selection(context: Context): Pair<String, Array<String>> {
+    fun selection(): Pair<String, Array<String>> {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             "${MediaStore.Video.Media.RELATIVE_PATH} = ? AND ${MediaStore.Video.Media.IS_PENDING} = 0" to
                 arrayOf(RECORDING_RELATIVE_PATH)
         } else {
             val moviesDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES), "CCTVApp")
             "${MediaStore.Video.Media.DATA} LIKE ?" to arrayOf("${moviesDir.absolutePath}/%")
+        }
+    }
+
+    /**
+     * Selects rows under [RECORDING_RELATIVE_PATH] left behind by a segment that never got
+     * any data written -- the process died (crash, OOM-kill, force-stop) between
+     * [GalleryRecordingManager] inserting the row and either finishing or discarding it.
+     * A normal shutdown always goes through one of those two paths, so every row this
+     * matches is stale. `IS_PENDING = 1` alone isn't enough on API 29+: a pending row an
+     * app itself created is visible to that app's own queries, but the OS also
+     * auto-publishes (clears `IS_PENDING`) orphaned pending rows after a while (e.g. across
+     * a reboot), so the empty-size check catches those too. `SIZE` is checked against both
+     * `0` and `NULL` -- confirmed on a real device that a row inserted (pre-Q `DATA` path
+     * set) before the process died and RootEncoder ever created the file leaves `SIZE`
+     * `NULL`, not `0`. Only [GalleryRecordingManager.cleanupOrphanedSegments] uses this, and
+     * only once at service startup before any new segment can exist.
+     */
+    @Suppress("DEPRECATION") // MediaStore.Video.Media.DATA / Environment.getExternalStoragePublicDirectory: pre-Q only path
+    fun orphanSelection(): Pair<String, Array<String>> {
+        val emptySize = "(${MediaStore.Video.Media.SIZE} = 0 OR ${MediaStore.Video.Media.SIZE} IS NULL)"
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            "${MediaStore.Video.Media.RELATIVE_PATH} = ? AND " +
+                "(${MediaStore.Video.Media.IS_PENDING} = 1 OR $emptySize)" to
+                arrayOf(RECORDING_RELATIVE_PATH)
+        } else {
+            val moviesDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES), "CCTVApp")
+            "${MediaStore.Video.Media.DATA} LIKE ? AND $emptySize" to
+                arrayOf("${moviesDir.absolutePath}/%")
         }
     }
 }
