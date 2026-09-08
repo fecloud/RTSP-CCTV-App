@@ -270,7 +270,6 @@ class CctvServerService : Service(), ConnectChecker {
         if (isCameraStreaming) {
             stopStreamAndRecording()
             startStream()
-            applyZoom()
         }
     }
 
@@ -328,17 +327,11 @@ class CctvServerService : Service(), ConnectChecker {
         applyForegroundServiceType()
 
         // startStream() does its own lazy-init of rtspServerCamera; no need to duplicate
-        // that check here.
+        // that check here. It also applies flashlight/vertical-flip/zoom itself once the
+        // stream is actually up -- nightModeEnabled needs no equivalent call here since
+        // updateNightModeSensor() only touches the sensor, already registered by
+        // startSettingsEffectsCollector's first emission.
         startStream()
-
-        // Apply flashlight, night mode, vertical flip and zoom after stream starts
-        serviceScope.launch {
-            delay(1000.milliseconds)
-            applyFlashlight()
-            updateNightModeSensor()
-            applyVerticalFlip()
-            applyZoom()
-        }
 
         return START_STICKY
     }
@@ -396,23 +389,24 @@ class CctvServerService : Service(), ConnectChecker {
                     Log.d(TAG, "RTSP auth disabled")
                 }
 
-                if (camera.prepareVideo(settings.videoWidth, settings.videoHeight, 30, bitrate, 0)) {
-                    camera.startStream()
-                    applyTimestampOverlay()
-                    publishStreamingStatus(camera, activeCodec = settings.videoCodec)
-                    galleryRecordingManager.startIfNeeded()
+                val activeCodec = if (camera.prepareVideo(settings.videoWidth, settings.videoHeight, 30, bitrate, 0)) {
+                    settings.videoCodec
                 } else {
                     Log.w(TAG, "Codec $selectedCodec preparation failed, falling back to H264")
                     camera.setVideoCodec(VideoCodec.H264)
-                    if (camera.prepareVideo(settings.videoWidth, settings.videoHeight, 30, bitrate, 0)) {
-                         camera.startStream()
-                         applyTimestampOverlay()
+                    if (camera.prepareVideo(settings.videoWidth, settings.videoHeight, 30, bitrate, 0)) "H264" else null
+                }
 
-                         publishStreamingStatus(camera, activeCodec = "H264")
-                         galleryRecordingManager.startIfNeeded()
-                    } else {
-                         Log.e(TAG, "H264 fallback preparation also failed.")
-                    }
+                if (activeCodec != null) {
+                    camera.startStream()
+                    applyTimestampOverlay()
+                    applyVerticalFlip()
+                    applyFlashlight()
+                    applyZoom()
+                    publishStreamingStatus(camera, activeCodec = activeCodec)
+                    galleryRecordingManager.startIfNeeded()
+                } else {
+                    Log.e(TAG, "H264 fallback preparation also failed.")
                 }
             }
         } catch (e: Exception) {
