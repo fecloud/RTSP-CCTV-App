@@ -53,15 +53,12 @@ class CctvServerService : Service(), ConnectChecker {
         private const val VIEWER_IDLE_TIMEOUT_MS = 10_000L
     }
 
-    private lateinit var rtspServerCamera: RtspServerCamera2
-
-    /** [rtspServerCamera] once created, or null before the first [startStream] call. */
-    private val cameraOrNull: RtspServerCamera2?
-        get() = if (::rtspServerCamera.isInitialized) rtspServerCamera else null
+    /** Null before the first [startStream] call. */
+    private var rtspServerCamera: RtspServerCamera2? = null
 
     /** True only once the camera exists and is actively streaming. */
     private val isCameraStreaming: Boolean
-        get() = cameraOrNull?.isStreaming == true
+        get() = rtspServerCamera?.isStreaming == true
 
     private val settings: ServiceSettings get() = ServiceStateRepository.current
     private var isLanternOn = false
@@ -102,7 +99,7 @@ class CctvServerService : Service(), ConnectChecker {
         GalleryRecordingManager(
             context = this,
             onMain = ::onMain,
-            camera = { cameraOrNull },
+            camera = { rtspServerCamera },
             recordToGalleryEnabled = { settings.recordToGalleryEnabled },
             recordSegmentMinutes = { settings.recordSegmentMinutes },
             recordStorageThresholdPercent = { settings.recordStorageThresholdPercent }
@@ -255,7 +252,7 @@ class CctvServerService : Service(), ConnectChecker {
                 }
                 if (!first && prev.switchCameraRequest != curr.switchCameraRequest) {
                     try {
-                        cameraOrNull?.switchCamera()
+                        rtspServerCamera?.switchCamera()
                     } catch (e: Exception) {
                         Log.e(TAG, "switchCamera failed", e)
                     }
@@ -274,11 +271,11 @@ class CctvServerService : Service(), ConnectChecker {
     }
 
     private fun applyAuthorization() {
-        if (!isCameraStreaming) return
+        val camera = rtspServerCamera?.takeIf { it.isStreaming } ?: return
         if (settings.authEnabled && settings.authUsername.isNotEmpty() && settings.authPassword.isNotEmpty()) {
-            rtspServerCamera.getStreamClient().setAuthorization(settings.authUsername, settings.authPassword)
+            camera.getStreamClient().setAuthorization(settings.authUsername, settings.authPassword)
         } else {
-            rtspServerCamera.getStreamClient().setAuthorization("", "")
+            camera.getStreamClient().setAuthorization("", "")
         }
     }
 
@@ -290,7 +287,7 @@ class CctvServerService : Service(), ConnectChecker {
      */
     private fun stopStreamAndRecording() {
         galleryRecordingManager.stop()
-        rtspServerCamera.stopStream()
+        rtspServerCamera?.stopStream()
         // The ticker (and the filter it updates) is tied to this stream's camera/GL
         // session -- without this it keeps calling setText on a filter belonging to a
         // now-torn-down session every second until the stream restarts.
@@ -302,8 +299,8 @@ class CctvServerService : Service(), ConnectChecker {
     }
 
     /** Publishes live status right after a successful `startStream()`. */
-    private fun publishStreamingStatus(activeCodec: String) {
-        val range = rtspServerCamera.zoomRange
+    private fun publishStreamingStatus(camera: RtspServerCamera2, activeCodec: String) {
+        val range = camera.zoomRange
         ServiceStateRepository.updateSettings(this) { it.copy(activeCodec = activeCodec) }
         ServiceStateRepository.updateRuntime { it.copy(isStreaming = true, zoomRange = range.lower to range.upper) }
         startSnapshotLoop()
@@ -312,25 +309,22 @@ class CctvServerService : Service(), ConnectChecker {
     private fun takeSnapshot() {
         if (!isCameraStreaming) return
         try {
-            cameraOrNull?.glInterface?.takePhoto { bitmap ->
+            rtspServerCamera?.glInterface?.takePhoto { bitmap ->
                 val stream = ByteArrayOutputStream()
                 bitmap.compress(Bitmap.CompressFormat.JPEG, 50, stream)
                 val jpeg = stream.toByteArray()
                 CameraRuntimeBus.currentSnapshot.set(jpeg)
             }
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e(TAG, "takeSnapshot failed", e)
         }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         applyForegroundServiceType()
 
-        // Initialize wrapper if needed
-        if (!::rtspServerCamera.isInitialized) {
-             rtspServerCamera = RtspServerCamera2(this, this, 8554)
-        }
-
+        // startStream() does its own lazy-init of rtspServerCamera; no need to duplicate
+        // that check here.
         startStream()
 
         // Apply flashlight, night mode, vertical flip and zoom after stream starts
@@ -347,11 +341,9 @@ class CctvServerService : Service(), ConnectChecker {
 
     private fun startStream() {
         try {
-            if (!::rtspServerCamera.isInitialized) {
-                rtspServerCamera = RtspServerCamera2(this, this, 8554)
-            }
+            val camera = rtspServerCamera ?: RtspServerCamera2(this, this, 8554).also { rtspServerCamera = it }
 
-            if (!rtspServerCamera.isStreaming) {
+            if (!camera.isStreaming) {
                 val maxRes = getMaxCameraResolution()
                 if (settings.videoWidth <= 0 || settings.videoHeight <= 0 ||
                     settings.videoWidth.toLong() * settings.videoHeight > maxRes.first.toLong() * maxRes.second
@@ -371,9 +363,9 @@ class CctvServerService : Service(), ConnectChecker {
                     ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) ==
                         PackageManager.PERMISSION_GRANTED
                 ) {
-                    rtspServerCamera.prepareAudio(64 * 1024, 44100, true, false, false)
+                    camera.prepareAudio(64 * 1024, 44100, true, false, false)
                 } else {
-                    rtspServerCamera.disableAudio()
+                    camera.disableAudio()
                 }
 
                 // Check and set Codec
@@ -383,36 +375,36 @@ class CctvServerService : Service(), ConnectChecker {
                     // pickers; this branch only catches stale prefs, falling back to H.264.
                     else -> VideoCodec.H264
                 }
-                
-                rtspServerCamera.setVideoCodec(selectedCodec)
+
+                camera.setVideoCodec(selectedCodec)
                 Log.d(TAG, "Selected codec: $selectedCodec (${settings.videoCodec})")
 
                 val codecType = CodecUtil.CodecType.FIRST_COMPATIBLE_FOUND
-                rtspServerCamera.forceCodecType(codecType, codecType)
+                camera.forceCodecType(codecType, codecType)
                 Log.d(TAG, "Codec type: $codecType")
 
                 // Set authentication
                 if (settings.authEnabled && settings.authUsername.isNotEmpty() && settings.authPassword.isNotEmpty()) {
-                    rtspServerCamera.getStreamClient().setAuthorization(settings.authUsername, settings.authPassword)
+                    camera.getStreamClient().setAuthorization(settings.authUsername, settings.authPassword)
                     Log.d(TAG, "RTSP auth enabled for user: ${settings.authUsername}")
                 } else {
-                    rtspServerCamera.getStreamClient().setAuthorization("", "")
+                    camera.getStreamClient().setAuthorization("", "")
                     Log.d(TAG, "RTSP auth disabled")
                 }
 
-                if (rtspServerCamera.prepareVideo(settings.videoWidth, settings.videoHeight, 30, bitrate, 0)) {
-                    rtspServerCamera.startStream()
+                if (camera.prepareVideo(settings.videoWidth, settings.videoHeight, 30, bitrate, 0)) {
+                    camera.startStream()
                     applyTimestampOverlay()
-                    publishStreamingStatus(activeCodec = settings.videoCodec)
+                    publishStreamingStatus(camera, activeCodec = settings.videoCodec)
                     galleryRecordingManager.startIfNeeded()
                 } else {
                     Log.w(TAG, "Codec $selectedCodec preparation failed, falling back to H264")
-                    rtspServerCamera.setVideoCodec(VideoCodec.H264)
-                    if (rtspServerCamera.prepareVideo(settings.videoWidth, settings.videoHeight, 30, bitrate, 0)) {
-                         rtspServerCamera.startStream()
+                    camera.setVideoCodec(VideoCodec.H264)
+                    if (camera.prepareVideo(settings.videoWidth, settings.videoHeight, 30, bitrate, 0)) {
+                         camera.startStream()
                          applyTimestampOverlay()
 
-                         publishStreamingStatus(activeCodec = "H264")
+                         publishStreamingStatus(camera, activeCodec = "H264")
                          galleryRecordingManager.startIfNeeded()
                     } else {
                          Log.e(TAG, "H264 fallback preparation also failed.")
@@ -433,7 +425,7 @@ class CctvServerService : Service(), ConnectChecker {
 
         try {
             val filter = TextObjectFilterRender()
-            cameraOrNull?.glInterface?.setFilter(filter)
+            rtspServerCamera?.glInterface?.setFilter(filter)
 
             val fontSize = getOverlayFontSize()
             filter.setText(buildTimestampString(), fontSize, Color.WHITE, Typeface.DEFAULT_BOLD)
@@ -515,14 +507,14 @@ class CctvServerService : Service(), ConnectChecker {
         CameraResolutionUtil.getSupportedResolutions(this).firstOrNull() ?: Pair(1920, 1080)
 
     private fun applyFlashlight() {
-        if (!isCameraStreaming) return
+        val camera = rtspServerCamera?.takeIf { it.isStreaming } ?: return
         try {
             if (settings.flashlightEnabled && !isLanternOn) {
-                rtspServerCamera.enableLantern()
+                camera.enableLantern()
                 isLanternOn = true
                 Log.d(TAG, "Flashlight ON")
             } else if (!settings.flashlightEnabled && isLanternOn) {
-                rtspServerCamera.disableLantern()
+                camera.disableLantern()
                 isLanternOn = false
                 Log.d(TAG, "Flashlight OFF")
             }
@@ -551,18 +543,18 @@ class CctvServerService : Service(), ConnectChecker {
      */
     private fun applyVerticalFlip() {
         try {
-            cameraOrNull?.glInterface?.setRotation(if (settings.verticalFlipEnabled) 90 else 270)
+            rtspServerCamera?.glInterface?.setRotation(if (settings.verticalFlipEnabled) 90 else 270)
         } catch (e: Exception) {
             Log.e(TAG, "Failed to set vertical flip", e)
         }
     }
 
     private fun applyZoom() {
-        if (!isCameraStreaming) return
+        val camera = rtspServerCamera?.takeIf { it.isStreaming } ?: return
         try {
-            val range = rtspServerCamera.zoomRange
+            val range = camera.zoomRange
             val clamped = settings.zoomLevel.coerceIn(range.lower, range.upper)
-            rtspServerCamera.zoom = clamped
+            camera.zoom = clamped
             Log.d(TAG, "Zoom set to $clamped (requested ${settings.zoomLevel}, range=$range)")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to set zoom", e)
@@ -570,9 +562,9 @@ class CctvServerService : Service(), ConnectChecker {
     }
 
     private fun applyBitrate() {
-        if (!isCameraStreaming) return
+        val camera = rtspServerCamera?.takeIf { it.isStreaming } ?: return
         try {
-            rtspServerCamera.setVideoBitrateOnFly(settings.bitrateKbps * 1024)
+            camera.setVideoBitrateOnFly(settings.bitrateKbps * 1024)
             Log.d(TAG, "Bitrate set to ${settings.bitrateKbps}kbps")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to set bitrate", e)
@@ -601,10 +593,10 @@ class CctvServerService : Service(), ConnectChecker {
 
         try {
             if (isCameraStreaming) {
-                rtspServerCamera.stopStream()
+                rtspServerCamera?.stopStream()
             }
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e(TAG, "stopStream on destroy failed", e)
         }
         ServiceStateRepository.updateRuntime { it.copy(isStreaming = false) }
 
