@@ -27,6 +27,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlin.time.Duration.Companion.milliseconds
 
 /**
@@ -122,19 +123,44 @@ class GalleryRecordingManager(
         beginNewSegment(cam)
     }
 
-    /** Cancels any pending rotation and stops the in-flight segment without starting another. */
-    fun stop() {
+    /**
+     * Cancels any pending rotation and stops the in-flight segment without starting another.
+     *
+     * `suspend` because [RecordController.stopRecord] (RootEncoder's `AsyncBaseRecordController`)
+     * runs a `runBlocking { muxerJob.join() }` internally -- calling it straight from a
+     * `Dispatchers.Main.immediate` coroutine (as this used to) blocks the real Android main
+     * thread until the muxer job finishes, which silently wedges every other main-thread
+     * coroutine in the service (the timestamp ticker included) if that join ever takes a
+     * while -- e.g. the camera HAL having gotten into a bad state, observed for real on
+     * device: `stopRecord()` never returned, and nothing downstream of the main thread ever
+     * ran again for the rest of that process's life. `withContext(Dispatchers.IO)` moves the
+     * block onto a background thread instead, same fix as [CctvServerService]'s timestamp
+     * ticker already applies to its own CPU-temperature read.
+     */
+    suspend fun stop() {
         rotationJob?.cancel()
         val cam = camera() ?: return
         if (cam.isRecording) {
             stoppingDeliberately = true
-            cam.stopRecord()
+            withContext(Dispatchers.IO) { cam.stopRecord() }
         }
     }
 
-    /** Call from the service's onDestroy to release the rotation timer and executor. */
+    /**
+     * Call from the service's onDestroy to release the rotation timer and executor.
+     *
+     * Deliberately fire-and-forget rather than `suspend`: `onDestroy` isn't a coroutine and
+     * must return promptly, and by this point nothing downstream depends on the segment
+     * having actually finished stopping. Runs on its own scope, not [managerScope], so the
+     * `managerScope.cancel()` right after doesn't cancel the stop it just launched.
+     */
     fun shutdown() {
-        stop()
+        rotationJob?.cancel()
+        val cam = camera()
+        if (cam?.isRecording == true) {
+            stoppingDeliberately = true
+            CoroutineScope(Dispatchers.IO).launch { runCatching { cam.stopRecord() } }
+        }
         managerScope.cancel()
     }
 
@@ -211,7 +237,10 @@ class GalleryRecordingManager(
                     ServiceStateRepository.updateRuntime { it.copy(isRecordingToGallery = true) }
                     rotationJob = managerScope.launch {
                         delay((recordSegmentMinutes() * 60_000L).milliseconds)
-                        if (liveCam.isRecording) liveCam.stopRecord()
+                        // See stop()'s kdoc: stopRecord() blocks its caller on a
+                        // runBlocking { muxerJob.join() }, so it must never run directly on
+                        // this Dispatchers.Main.immediate coroutine.
+                        if (liveCam.isRecording) withContext(Dispatchers.IO) { liveCam.stopRecord() }
                     }
                 } catch (e: Exception) {
                     Log.e(TAG, "startRecord failed", e)

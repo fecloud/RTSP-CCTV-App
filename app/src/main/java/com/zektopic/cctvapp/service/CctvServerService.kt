@@ -283,7 +283,7 @@ class CctvServerService : Service(), ConnectChecker {
     }
 
     /** Restarts an in-flight stream so a changed encoder setting takes effect. Main thread only. */
-    private fun restartStreamIfRunning() {
+    private suspend fun restartStreamIfRunning() {
         if (isCameraStreaming) {
             stopStreamAndRecording()
             startStream()
@@ -305,7 +305,7 @@ class CctvServerService : Service(), ConnectChecker {
      * next. Replaces the bare `rtspServerCamera.stopStream()` call so every stop site tears
      * down recording the same way instead of each needing its own reminder to do so.
      */
-    private fun stopStreamAndRecording() {
+    private suspend fun stopStreamAndRecording() {
         galleryRecordingManager.stop()
         rtspServerCamera?.stopStream()
         // The ticker (and the filter it updates) is tied to this stream's camera/GL
