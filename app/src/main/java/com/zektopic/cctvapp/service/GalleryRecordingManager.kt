@@ -73,17 +73,39 @@ class GalleryRecordingManager(
     private var currentRecordingUri: Uri? = null
     private var currentRecordingPfd: ParcelFileDescriptor? = null
 
+    // Set by [stop] right before it calls `cam.stopRecord()`, main-thread-only like the
+    // fields above. RootEncoder surfaces that self-inflicted stop as a `JobCancellationException`
+    // through `onError` (rather than only through `onStatusChange(STOPPED)`), which is
+    // indistinguishable from a genuine recording failure unless we remember we asked for it.
+    private var stoppingDeliberately = false
+
     private val recordListener = object : RecordController.Listener {
         override fun onStatusChange(status: RecordController.Status) {
             if (status == RecordController.Status.STOPPED) {
-                onMain { finalizeCurrentSegment(rotateNext = recordToGalleryEnabled()) }
+                onMain { finalizeCurrentSegment(rotateNext = shouldRotateNext()) }
             }
         }
 
         override fun onError(e: Exception?) {
             Log.e(TAG, "Gallery recording error", e)
-            onMain { finalizeCurrentSegment(rotateNext = recordToGalleryEnabled()) }
+            onMain { finalizeCurrentSegment(rotateNext = shouldRotateNext()) }
         }
+    }
+
+    /**
+     * Whether the segment that just ended should be immediately followed by a new one.
+     * False whenever [stop] -- not a natural segment-timer rotation -- is why recording
+     * ended, even if [recordToGalleryEnabled] is still on: `stop()` is called right before
+     * `stopStreamAndRecording()` tears down and restarts the stream, and racing a fresh
+     * MediaStore insert into that teardown window only fights the restart, which calls
+     * [startIfNeeded] itself once the new stream is up.
+     */
+    private fun shouldRotateNext(): Boolean {
+        if (stoppingDeliberately) {
+            stoppingDeliberately = false
+            return false
+        }
+        return recordToGalleryEnabled()
     }
 
     /**
@@ -104,7 +126,10 @@ class GalleryRecordingManager(
     fun stop() {
         rotationJob?.cancel()
         val cam = camera() ?: return
-        if (cam.isRecording) cam.stopRecord()
+        if (cam.isRecording) {
+            stoppingDeliberately = true
+            cam.stopRecord()
+        }
     }
 
     /** Call from the service's onDestroy to release the rotation timer and executor. */
@@ -154,7 +179,7 @@ class GalleryRecordingManager(
      */
     private class GalleryEntry(val uri: Uri, val pfd: ParcelFileDescriptor?, val path: String?)
 
-    private fun beginNewSegment(cam: RtspServerCamera2) {
+    private fun beginNewSegment(liveCam: RtspServerCamera2) {
         managerScope.launch(mediaStoreDispatcher) {
             val entry = try {
                 insertGalleryVideoEntry()
@@ -165,8 +190,7 @@ class GalleryRecordingManager(
             if (entry == null) return@launch
 
             onMain {
-                val liveCam = camera()
-                if (liveCam == null || !liveCam.isStreaming || !recordToGalleryEnabled()) {
+                if (!liveCam.isStreaming || !recordToGalleryEnabled()) {
                     // Setting was turned off or the stream stopped while the insert was
                     // in flight -- discard the just-created (empty) MediaStore row instead
                     // of leaving a stuck IS_PENDING entry in the gallery.
