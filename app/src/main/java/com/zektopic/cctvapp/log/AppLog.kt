@@ -36,7 +36,7 @@ object AppLog {
     }
 
     /** [debuggable]: also forward every line to real logcat, in addition to the file. */
-    fun init(context: Context, debuggable: Boolean) {
+    fun init(context: Context, debuggable: Boolean = true) {
         // App-specific external storage: no permission needed at this minSdk, and unlike
         // internal storage it's pullable straight off the device (adb pull / a file
         // manager) without needing a debuggable build + run-as. Falls back to internal
