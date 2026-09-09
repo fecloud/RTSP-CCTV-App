@@ -41,10 +41,10 @@ to be one flat package, but it grew past the point that stayed readable):
 | Package | Files | Responsibility |
 |---|---|---|
 | *(root)* | `MainActivity.kt`, `CctvApplication.kt` | App entry points — the components Android launches by class name, plus process-wide init (Bugly, `AppLog`, the always-on `WebServer`) in `CctvApplication.onCreate` |
-| `.service` | `CctvServerService.kt`, `GalleryRecordingManager.kt`, `ServiceNotificationUtil.kt` | The foreground service: camera/encoder/stream lifecycle, gallery recording, the notification |
+| `.service` | `CctvServerService.kt`, `RecordingManager.kt`, `ServiceNotificationUtil.kt` | The foreground service: camera/encoder/stream lifecycle, local recording, the notification |
 | `.settings` | `AppPreferences.kt`, `ServiceState.kt`, `ServiceStateRepository.kt`, `SettingEffects.kt`, `SettingUpdateHandler.kt` | Settings persistence and the shared in-memory data source (see "Settings: one shared data source" below) |
 | `.web` | `WebServer.kt`, `WebAuth.kt` | NanoHTTPD dashboard server + HTTP Basic auth |
-| `.camera` | `CameraResolutionUtil.kt` | Camera2 supported-resolution querying, shared by the service, `GalleryRecordingManager`, and `MainActivity` |
+| `.camera` | `CameraResolutionUtil.kt` | Camera2 supported-resolution querying, shared by the service, `RecordingManager`, and `MainActivity` |
 | `.device` | `DeviceStatsUtil.kt`, `ThermalZoneUtil.kt` | Battery/CPU/Wi-Fi telemetry surfaced in `/status` and the timestamp overlay |
 | `.log` | `AppLog.kt`, `LogLineFormatter.kt` | `android.util.Log`-compatible logger (import-aliased in at every call site) that also persists every line to a rotating file under app-specific external storage (falling back to internal storage if unavailable), since logcat isn't retrievable after the fact from a background service on someone else's phone |
 

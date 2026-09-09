@@ -6,7 +6,7 @@ import com.zektopic.cctvapp.BuildConfig
 import com.zektopic.cctvapp.log.AppLog as Log
 import com.zektopic.cctvapp.camera.CameraResolutionUtil
 import com.zektopic.cctvapp.device.DeviceStatsUtil
-import com.zektopic.cctvapp.service.RecordingsGallery
+import com.zektopic.cctvapp.service.RecordingsStore
 import com.zektopic.cctvapp.settings.ServiceRuntimeState
 import com.zektopic.cctvapp.settings.ServiceSettings
 import com.zektopic.cctvapp.settings.SettingUpdateHandler
@@ -17,8 +17,8 @@ import java.io.InputStream
 import java.text.SimpleDateFormat
 import java.util.Locale
 
-/** One saved recording under `Movies/CCTVApp/`, as listed on the `/recordings` page. */
-data class RecordingEntry(val id: Long, val displayName: String, val sizeBytes: Long, val dateAddedMillis: Long)
+/** One saved recording under app-private storage, as listed on the `/recordings` page. */
+data class RecordingEntry(val id: String, val displayName: String, val sizeBytes: Long, val dateAddedMillis: Long)
 
 class WebServer(
     private val context: Context,
@@ -224,19 +224,19 @@ class WebServer(
         }
 
         if (uri == "/recordings") {
-            return newFixedLengthResponse(buildRecordingsHtml(RecordingsGallery.listRecordings(context)))
+            return newFixedLengthResponse(buildRecordingsHtml(RecordingsStore.listRecordings(context)))
         }
 
         // Streams/downloads one recording. Honors a single-range `Range` header (what
         // browsers send when the user drags a <video>'s seek bar) so playback can jump
-        // around instead of only playing straight through from the start. Pure
-        // MediaStore reads -- available even while CctvServerService isn't running.
+        // around instead of only playing straight through from the start. Pure file
+        // reads -- available even while CctvServerService isn't running.
         if (uri == "/recording.mp4") {
-            val id = session.parameters["id"]?.get(0)?.toLongOrNull()
+            val id = session.parameters["id"]?.get(0)
                 ?: return newFixedLengthResponse(Response.Status.BAD_REQUEST, MIME_PLAINTEXT, "Missing id")
-            val entry = RecordingsGallery.listRecordings(context).find { it.id == id }
+            val entry = RecordingsStore.listRecordings(context).find { it.id == id }
                 ?: return newFixedLengthResponse(Response.Status.NOT_FOUND, MIME_PLAINTEXT, "Recording not found")
-            val stream = RecordingsGallery.openRecordingStream(context, id)
+            val stream = RecordingsStore.openRecordingStream(context, id)
                 ?: return newFixedLengthResponse(Response.Status.NOT_FOUND, MIME_PLAINTEXT, "Recording not found")
             val download = session.parameters["download"]?.get(0) == "1"
             val disposition = if (download) "attachment" else "inline"

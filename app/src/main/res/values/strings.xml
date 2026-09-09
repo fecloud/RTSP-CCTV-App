@@ -46,10 +46,10 @@
     <string name="zoom_level">Zoom</string>
     <string name="zoom_level_hint">Actual zoom is limited by your camera\'s hardware</string>
 
-    <!-- Record to Gallery -->
+    <!-- Record to local storage -->
     <string name="section_recording">Recording</string>
-    <string name="record_to_gallery_toggle">Record to Gallery</string>
-    <string name="record_to_gallery_hint">Saves rotating segments to Movies/CCTVApp while the server is running</string>
+    <string name="record_to_gallery_toggle">Record to Local Storage</string>
+    <string name="record_to_gallery_hint">Saves rotating segments to app storage; browse them from the dashboard\'s Recordings page</string>
     <string name="record_segment_minutes_label">Segment Length (minutes)</string>
     <string name="record_storage_threshold_percent_label">Storage Full Threshold (%)</string>
 

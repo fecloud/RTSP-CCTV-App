@@ -97,12 +97,12 @@ class CctvServerService : Service(), ConnectChecker {
     private var snapshotJob: Job? = null
 
     /** Owned by this service alone -- constructed on first use, torn down in [onDestroy]. */
-    private val galleryRecordingManager by lazy {
-        GalleryRecordingManager(
+    private val recordingManager by lazy {
+        RecordingManager(
             context = this,
             onMain = ::onMain,
             camera = { rtspServerCamera },
-            recordToGalleryEnabled = { settings.recordToGalleryEnabled },
+            recordingEnabled = { settings.recordToGalleryEnabled },
             recordSegmentMinutes = { settings.recordSegmentMinutes },
             recordStorageThresholdPercent = { settings.recordStorageThresholdPercent }
         )
@@ -193,7 +193,7 @@ class CctvServerService : Service(), ConnectChecker {
 
         // Before any new segment can start: sweep away rows left by a segment the
         // previous process never got to finish/discard (crash, OOM-kill, force-stop).
-        galleryRecordingManager.cleanupOrphanedSegments()
+        recordingManager.cleanupOrphanedSegments()
 
         // Setup light sensor for night mode
         sensorManager = getSystemService(SENSOR_SERVICE) as SensorManager
@@ -243,7 +243,7 @@ class CctvServerService : Service(), ConnectChecker {
                     restartStreamIfRunning()
                 }
                 if (!first && prev.recordToGalleryEnabled != curr.recordToGalleryEnabled) {
-                    if (curr.recordToGalleryEnabled) galleryRecordingManager.startIfNeeded() else galleryRecordingManager.stop()
+                    if (curr.recordToGalleryEnabled) recordingManager.startIfNeeded() else recordingManager.stop()
                 }
             }
         }
@@ -306,7 +306,7 @@ class CctvServerService : Service(), ConnectChecker {
      * down recording the same way instead of each needing its own reminder to do so.
      */
     private suspend fun stopStreamAndRecording() {
-        galleryRecordingManager.stop()
+        recordingManager.stop()
         rtspServerCamera?.stopStream()
         // The ticker (and the filter it updates) is tied to this stream's camera/GL
         // session -- without this it keeps calling setText on a filter belonging to a
@@ -433,7 +433,7 @@ class CctvServerService : Service(), ConnectChecker {
                     applyFlashlight()
                     applyZoom()
                     publishStreamingStatus(camera, activeCodec = activeCodec)
-                    galleryRecordingManager.startIfNeeded()
+                    recordingManager.startIfNeeded()
                 } else {
                     Log.e(TAG, "H264 fallback preparation also failed.")
                 }
@@ -628,7 +628,7 @@ class CctvServerService : Service(), ConnectChecker {
         super.onDestroy()
         serviceScope.cancel()
         sensorManager?.unregisterListener(lightSensorListener)
-        galleryRecordingManager.shutdown()
+        recordingManager.shutdown()
 
         try {
             if (isCameraStreaming) {

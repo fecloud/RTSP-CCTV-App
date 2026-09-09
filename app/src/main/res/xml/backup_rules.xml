@@ -2,11 +2,13 @@
 <!--
     Auto Backup rules (devices below API 31).
 
-    The preference file holds the RTSP / dashboard credentials in plain text, and the
-    events directory holds camera snapshots. Neither belongs in a cloud backup, so both
-    are excluded; everything else is allowed to back up normally.
+    The preference file holds the RTSP / dashboard credentials in plain text, the events
+    directory holds camera snapshots, and the recordings directory holds video segments.
+    None of these belong in a cloud backup (the recordings especially: they can grow to
+    several GB), so all three are excluded; everything else is allowed to back up normally.
 -->
 <full-backup-content>
     <exclude domain="sharedpref" path="cctv_app_prefs.xml" />
     <exclude domain="file" path="events/" />
+    <exclude domain="external" path="recordings/" />
 </full-backup-content>

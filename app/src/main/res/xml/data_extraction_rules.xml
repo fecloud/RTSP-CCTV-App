@@ -2,18 +2,21 @@
 <!--
     Backup / transfer rules for API 31+.
 
-    Credentials (cctv_app_prefs) and captured snapshots (events/) are excluded from
-    cloud backup. Device-to-device transfer keeps the settings but still excludes the
-    credentials, so a moved install prompts for a fresh password rather than carrying
-    the old one across devices.
+    Credentials (cctv_app_prefs), captured snapshots (events/), and recorded video
+    segments (recordings/, which can grow to several GB) are excluded from cloud backup.
+    Device-to-device transfer keeps the settings but still excludes the credentials and
+    recordings, so a moved install prompts for a fresh password rather than carrying the
+    old one across devices, and doesn't drag gigabytes of video along with it.
 -->
 <data-extraction-rules>
     <cloud-backup>
         <exclude domain="sharedpref" path="cctv_app_prefs.xml" />
         <exclude domain="file" path="events/" />
+        <exclude domain="external" path="recordings/" />
     </cloud-backup>
     <device-transfer>
         <exclude domain="sharedpref" path="cctv_app_prefs.xml" />
         <exclude domain="file" path="events/" />
+        <exclude domain="external" path="recordings/" />
     </device-transfer>
 </data-extraction-rules>

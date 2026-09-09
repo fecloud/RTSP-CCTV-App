@@ -56,11 +56,6 @@ class MainActivity : AppCompatActivity() {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 add(Manifest.permission.POST_NOTIFICATIONS)
             }
-            // Only needed pre-scoped-storage: API 29+ writes its own gallery recordings
-            // via MediaStore without any permission at all.
-            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
-                add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
-            }
         }.toTypedArray()
 
     /** Only these block the server from running. */

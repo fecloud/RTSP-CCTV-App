@@ -231,8 +231,9 @@ cross-origin `Origin` header are rejected with `403`.
 | `bitrate_kbps` | int 500–8000 | Video bitrate, applied live while streaming |
 | `audio_enabled` | bool | Include microphone audio in the stream |
 | `web_auth_enabled` | bool | Require authentication on port 8081 |
-| `record_to_gallery_enabled` | bool | Record rotating segments to `Movies/CCTVApp` in the gallery |
+| `record_to_gallery_enabled` | bool | Record rotating segments to the app's private storage, browsable via `/recordings` |
 | `record_segment_minutes` | int 1–60 | Length of each recorded segment |
+| `record_storage_threshold_percent` | int 50–95 | Local storage usage above which the oldest recorded segments are deleted |
 
 </details>
 
@@ -249,9 +250,11 @@ cross-origin `Origin` header are rejected with `403`.
 | `RECORD_AUDIO`, `FOREGROUND_SERVICE_MICROPHONE` | Only with audio on | Audio is opt-in; the microphone type is only claimed when you enable it. |
 | `POST_NOTIFICATIONS` | Recommended | Android 13+. Without it the service notification is suppressed and you lose the visible indicator that the camera is live. |
 | `ACCESS_WIFI_STATE`, `ACCESS_FINE_LOCATION` | Optional | Wi-Fi signal readout on the dashboard. Android 8.1+ hands back a placeholder RSSI (so the dashboard shows no signal) unless the app has location permission *and* the device's system location toggle is on. |
-| `WRITE_EXTERNAL_STORAGE` | Only on Android 9 and below, with gallery recording on | Writing video segments to the gallery pre-scoped-storage. Not needed on Android 10+, where the app writes its own `MediaStore` rows without any permission. |
 
-No internet permission is used to send data anywhere. Nothing leaves your network.
+No internet permission is used to send data anywhere. Nothing leaves your network. Recorded
+segments are written to the app's own private storage (not the shared gallery/`MediaStore`),
+so no storage permission is needed on any Android version, and recordings are wiped
+automatically when the app is uninstalled.
 
 ---
 
