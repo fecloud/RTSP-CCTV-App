@@ -38,6 +38,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlin.time.Duration.Companion.milliseconds
 
 class CctvServerService : Service(), ConnectChecker {
@@ -60,7 +61,8 @@ class CctvServerService : Service(), ConnectChecker {
     private val isCameraStreaming: Boolean
         get() = rtspServerCamera?.isStreaming == true
 
-    private val settings: ServiceSettings get() = ServiceStateRepository.current
+    private val settings: ServiceSettings get() = ServiceStateRepository.settings
+
     private var isLanternOn = false
 
     /**
@@ -121,11 +123,26 @@ class CctvServerService : Service(), ConnectChecker {
         override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
     }
 
+    private val timestampFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
+
+    /**
+     * Reused across every [takeSnapshot] call instead of allocating a fresh
+     * [ByteArrayOutputStream] every 500ms-3s -- pre-sized to a typical JPEG-at-quality-50
+     * size to also avoid the internal buffer's own repeated grow-and-copy. Safe to reuse
+     * because `glInterface.takePhoto`'s callback runs on RootEncoder's single-thread GL
+     * executor, i.e. never concurrently with itself.
+     */
+    private val snapshotBuffer = ByteArrayOutputStream(64 * 1024)
+
     private fun startTimestampTicker() {
         timestampJob?.cancel()
         timestampJob = serviceScope.launch {
             while (isActive) {
-                updateTimestampText()
+                // The only blocking part of a tick: DeviceStatsUtil.getCpuTemperatureCelsius()
+                // reads kernel thermal-zone sysfs files, which must not happen on this
+                // Dispatchers.Main.immediate scope, so it's the one call hopped to IO.
+                val cpuTempCelsius = withContext(Dispatchers.IO) { DeviceStatsUtil.getCpuTemperatureCelsius() }
+                updateTimestampText(cpuTempCelsius)
                 delay(1000.milliseconds)
             }
         }
@@ -197,7 +214,7 @@ class CctvServerService : Service(), ConnectChecker {
     private fun startSettingsEffectsCollector() {
         serviceScope.launch {
             var previous: ServiceSettings? = null
-            ServiceStateRepository.settings.collect { curr ->
+            ServiceStateRepository.settingsFlow.collect { curr ->
                 val prev = previous
                 previous = curr
                 val first = prev == null
@@ -312,14 +329,26 @@ class CctvServerService : Service(), ConnectChecker {
     private fun takeSnapshot() {
         if (!isCameraStreaming) return
         try {
-            rtspServerCamera?.glInterface?.takePhoto { bitmap ->
-                val stream = ByteArrayOutputStream()
-                bitmap.compress(Bitmap.CompressFormat.JPEG, 50, stream)
-                val jpeg = stream.toByteArray()
-                CameraRuntimeBus.currentSnapshot.set(jpeg)
-            }
+            rtspServerCamera?.glInterface?.takePhoto(::onSnapshotBitmap)
         } catch (e: Exception) {
             Log.e(TAG, "takeSnapshot failed", e)
+        }
+    }
+
+    /**
+     * `takePhoto()` itself only stores this as a callback and returns immediately -- this
+     * runs later, asynchronously, on RootEncoder's single-thread GL executor whenever it
+     * next renders a frame. Needs its own try/catch separate from [takeSnapshot]'s (which
+     * only covers registering the callback): that one can't see anything thrown from here.
+     */
+    private fun onSnapshotBitmap(bitmap: Bitmap) {
+        try {
+            snapshotBuffer.reset()
+            bitmap.compress(Bitmap.CompressFormat.JPEG, 50, snapshotBuffer)
+            val jpeg = snapshotBuffer.toByteArray()
+            CameraRuntimeBus.currentSnapshot.set(jpeg)
+        } catch (e: Exception) {
+            Log.e(TAG, "takeSnapshot callback failed", e)
         }
     }
 
@@ -426,7 +455,12 @@ class CctvServerService : Service(), ConnectChecker {
             rtspServerCamera?.glInterface?.setFilter(filter)
 
             val fontSize = getOverlayFontSize()
-            filter.setText(buildTimestampString(), fontSize, Color.WHITE, Typeface.DEFAULT_BOLD)
+            // No CPU temp yet: this runs on the main thread, so it can't call
+            // DeviceStatsUtil.getCpuTemperatureCelsius() itself (see startTimestampTicker),
+            // and DeviceStatsUtil no longer caches a value to peek instead. The overlay
+            // shows without one for at most a second, until startTimestampTicker()'s first
+            // tick reads one in the background and fills it in.
+            filter.setText(buildTimestampString(cpuTempCelsius = null), fontSize, Color.WHITE, Typeface.DEFAULT_BOLD)
 
             val scaleW = when (settings.timestampSize) {
                 "Small" -> 14f
@@ -460,11 +494,11 @@ class CctvServerService : Service(), ConnectChecker {
         }
     }
 
-    private fun updateTimestampText() {
+    private fun updateTimestampText(cpuTempCelsius: Float?) {
         val filter = textFilter ?: return
         if (!settings.showTimestamp) return
         try {
-            filter.setText(buildTimestampString(), getOverlayFontSize(), Color.WHITE, Typeface.DEFAULT_BOLD)
+            filter.setText(buildTimestampString(cpuTempCelsius), getOverlayFontSize(), Color.WHITE, Typeface.DEFAULT_BOLD)
         } catch (e: Exception) {
             // Ignore - filter may not be ready
             Log.e(TAG, "updateTimestampText skipped, filter not ready", e)
@@ -479,12 +513,19 @@ class CctvServerService : Service(), ConnectChecker {
         }
     }
 
-    private fun buildTimestampString(): String {
+    /**
+     * [cpuTempCelsius] is passed in rather than read here because this is called from the
+     * main thread (both [applyTimestampOverlay]'s initial render and every
+     * [updateTimestampText] tick) -- unlike [DeviceStatsUtil.getBatteryLevel] and
+     * [DeviceStatsUtil.getBatteryTemperatureCelsius] (cheap Binder/sticky-broadcast reads),
+     * [DeviceStatsUtil.getCpuTemperatureCelsius] reads kernel sysfs files and must not be
+     * called from here -- see [startTimestampTicker].
+     */
+    private fun buildTimestampString(cpuTempCelsius: Float?): String {
         val now = Date()
         val parts = mutableListOf<String>()
         if (settings.showTimestamp) {
-            parts.add(SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(now))
-            parts.add(SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(now))
+            parts.add(timestampFormat.format(now))
         }
         val batteryLevel = DeviceStatsUtil.getBatteryLevel(this)
         if (batteryLevel >= 0) {
@@ -495,7 +536,7 @@ class CctvServerService : Service(), ConnectChecker {
                 ?.let { " %.0f°C".format(Locale.getDefault(), it) } ?: ""
             parts.add("$batteryLevel%$batteryTemp")
         }
-        DeviceStatsUtil.getCpuTemperatureCelsius()?.let { temp ->
+        cpuTempCelsius?.let { temp ->
             parts.add("%.0f°C".format(Locale.getDefault(), temp))
         }
         return parts.joinToString(" ")

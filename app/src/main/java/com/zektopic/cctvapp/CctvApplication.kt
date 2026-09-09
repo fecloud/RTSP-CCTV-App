@@ -4,7 +4,6 @@ import android.app.Application
 import android.content.pm.ApplicationInfo
 import com.zektopic.cctvapp.log.AppLog as Log
 import com.tencent.bugly.crashreport.CrashReport
-import com.zektopic.cctvapp.camera.CameraResolutionUtil
 import com.zektopic.cctvapp.device.DeviceStatsUtil
 import com.zektopic.cctvapp.log.AppLog
 import com.zektopic.cctvapp.service.CameraRuntimeBus
@@ -21,36 +20,17 @@ class CctvApplication : Application() {
      * Moved here from `CctvServerService` so the dashboard survives that service being
      * fully stopped -- previously `WebServer.start()`/`.stop()` were tied to the
      * service's own `onCreate`/`onDestroy`, so stopping the service killed the dashboard
-     * along with it.
-     *
-     * Every callback goes through [ServiceStateRepository] or [CameraRuntimeBus] -- the same
-     * shared, neutral singletons `CctvServerService` itself reads and writes -- so
-     * neither this class nor the service ever needs to reference the other's concrete
-     * type. Commands (`onStartStream`/`onStopStream`/`onSwitchCamera`) bump a request
-     * counter in [ServiceStateRepository]'s separate runtime `StateFlow` (see
-     * `ServiceRuntimeState`) that the service reacts to *while it's running* -- this does
-     * not itself restart a fully-stopped service. Status (`isStreaming`/`getZoomRange`)
-     * reads status the service publishes into that same runtime flow.
+     * along with it. [imageProvider] is the one callback `WebServer` still needs from
+     * outside: it reads [CameraRuntimeBus], a `.service`-package singleton `WebServer`
+     * (in `.web`) has no direct visibility into. Every other cross-cutting concern
+     * (settings, start/stop/switch-camera commands, zoom range) goes through
+     * [ServiceStateRepository], which `WebServer` already reads/writes directly.
      */
     private val webServer: WebServer by lazy {
         WebServer(this, DeviceStatsUtil.getIpAddress(this),
             imageProvider = {
                 CameraRuntimeBus.lastSnapshotRequestMs = System.currentTimeMillis()
                 CameraRuntimeBus.currentSnapshot.get()
-            },
-            onSwitchCamera = {
-                ServiceStateRepository.updateRuntime { it.copy(switchCameraRequest = it.switchCameraRequest + 1) }
-            },
-            onStartStream = {
-                ServiceStateRepository.updateRuntime { it.copy(startStreamRequest = it.startStreamRequest + 1) }
-            },
-            onStopStream = {
-                ServiceStateRepository.updateRuntime { it.copy(stopStreamRequest = it.stopStreamRequest + 1) }
-            },
-            isStreaming = { ServiceStateRepository.runtime.isStreaming },
-            getZoomRange = {
-                val r = ServiceStateRepository.runtime
-                if (r.isStreaming) r.zoomRange else CameraResolutionUtil.getZoomRange(this)
             },
         )
     }

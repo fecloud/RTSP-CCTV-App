@@ -12,7 +12,7 @@ import kotlinx.coroutines.flow.updateAndGet
  * the same process (the service has no `android:process` of its own), so there's no need
  * to round-trip a setting change through an `Intent` or HTTP round trip for a live
  * service to notice it: writing here is enough. `CctvServerService`'s settings-effects
- * collector observes [settings] directly and reacts to whatever actually changed.
+ * collector observes [settingsFlow] directly and reacts to whatever actually changed.
  *
  * Also holds [runtimeFlow]/[ServiceRuntimeState] -- a second, unrelated `StateFlow` for
  * live camera status and one-shot dashboard commands, deliberately not part of
@@ -20,13 +20,13 @@ import kotlinx.coroutines.flow.updateAndGet
  */
 object ServiceStateRepository {
     private val _settings = MutableStateFlow(ServiceSettings())
-    val settings: StateFlow<ServiceSettings> = _settings.asStateFlow()
+    val settingsFlow: StateFlow<ServiceSettings> = _settings.asStateFlow()
 
     /** Convenience synchronous snapshot, equivalent to `settings.value`. */
-    val current: ServiceSettings get() = _settings.value
+    val settings: ServiceSettings get() = _settings.value
 
     /**
-     * Separate from [settings] on purpose -- see [ServiceRuntimeState]'s kdoc. Nothing
+     * Separate from [settingsFlow] on purpose -- see [ServiceRuntimeState]'s kdoc. Nothing
      * here is persisted, so unlike [updateSettings] this needs no `Context`.
      */
     private val _runtime = MutableStateFlow(ServiceRuntimeState())

@@ -135,7 +135,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun loadSavedSettings() {
-        val s = ServiceStateRepository.current
+        val s = ServiceStateRepository.settings
 
         // Load saved codec
         (binding.spinnerCodec as? AutoCompleteTextView)?.setText(
@@ -463,7 +463,7 @@ class MainActivity : AppCompatActivity() {
 
         // Set RTSP and Web URLs
         if (ipv4Address != null) {
-            val s = ServiceStateRepository.current
+            val s = ServiceStateRepository.settings
             if (s.authEnabled && s.authUsername.isNotEmpty() && s.authPassword.isNotEmpty()) {
                 binding.textRtspUrl.text = "rtsp://${s.authUsername}:${s.authPassword}@$ip:8554/stream"
             } else {
@@ -508,7 +508,7 @@ class MainActivity : AppCompatActivity() {
         // Only claim the dashboard is protected when it actually is. The password is
         // seeded regardless of the toggle, so with it off the old wording told the user
         // they were covered while the dashboard stayed reachable by anyone on the network.
-        val message = if (ServiceStateRepository.current.webAuthEnabled) {
+        val message = if (ServiceStateRepository.settings.webAuthEnabled) {
             getString(R.string.generated_password_message, generated)
         } else {
             getString(R.string.generated_password_message_unprotected, generated)

@@ -15,6 +15,7 @@ import androidx.core.content.ContextCompat
 import com.pedro.library.base.recording.RecordController
 import com.pedro.rtspserver.RtspServerCamera2
 import com.zektopic.cctvapp.device.DeviceStatsUtil
+import com.zektopic.cctvapp.settings.ServiceStateRepository
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -54,10 +55,6 @@ class GalleryRecordingManager(
         private const val TAG = "GalleryRecordingManager"
     }
 
-    /** Read-only status surfaced in /status -- true only while a segment is actively being written. */
-    @Volatile var isRecordingToGallery = false
-        private set
-
     private val managerScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     // Coroutines-idiomatic equivalent of a single-thread executor: MediaStore work never
@@ -72,8 +69,7 @@ class GalleryRecordingManager(
     private var rotationJob: Job? = null
 
     // Main-thread-only bookkeeping for the segment currently being written -- never touched
-    // from mediaStoreDispatcher or a NanoHTTPD thread, so unlike isRecordingToGallery these
-    // don't need to be @Volatile.
+    // from mediaStoreDispatcher or a NanoHTTPD thread, so these don't need to be @Volatile.
     private var currentRecordingUri: Uri? = null
     private var currentRecordingPfd: ParcelFileDescriptor? = null
 
@@ -188,7 +184,7 @@ class GalleryRecordingManager(
                     }
                     currentRecordingUri = entry.uri
                     currentRecordingPfd = pfd
-                    isRecordingToGallery = true
+                    ServiceStateRepository.updateRuntime { it.copy(isRecordingToGallery = true) }
                     rotationJob = managerScope.launch {
                         delay((recordSegmentMinutes() * 60_000L).milliseconds)
                         if (liveCam.isRecording) liveCam.stopRecord()
@@ -212,7 +208,7 @@ class GalleryRecordingManager(
         val pfd = currentRecordingPfd
         currentRecordingUri = null
         currentRecordingPfd = null
-        isRecordingToGallery = false
+        ServiceStateRepository.updateRuntime { it.copy(isRecordingToGallery = false) }
 
         if (uri == null) {
             if (rotateNext) startIfNeeded()

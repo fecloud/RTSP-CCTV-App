@@ -73,7 +73,7 @@ object DeviceStatsUtil {
      * unpredictably device-to-device) rather than being a reliable cross-device API.
      */
     fun getCpuTemperatureCelsius(): Float? {
-        val zones = java.io.File("/sys/class/thermal").listFiles { f ->
+        val zones = File("/sys/class/thermal").listFiles { f ->
             f.name.startsWith("thermal_zone")
         } ?: return null
 

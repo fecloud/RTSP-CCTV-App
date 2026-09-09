@@ -79,6 +79,14 @@ data class ServiceSettings(
 data class ServiceRuntimeState(
     /** True only once the camera exists and is actively streaming. */
     val isStreaming: Boolean = false,
+    /**
+     * True only while [com.zektopic.cctvapp.service.GalleryRecordingManager] has a gallery
+     * segment actively being written -- distinct from [ServiceSettings.recordToGalleryEnabled],
+     * which just reflects whether the user turned the feature on (e.g. still true while the
+     * stream itself is stopped, or during the brief gap between one segment finishing and the
+     * next starting).
+     */
+    val isRecordingToGallery: Boolean = false,
     val zoomRange: Pair<Float, Float> = 1f to 1f,
     /**
      * Bumped by `WebServer` (via [ServiceStateRepository.updateRuntime]) to request an

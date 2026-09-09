@@ -6,6 +6,7 @@ import com.zektopic.cctvapp.log.AppLog as Log
 import com.zektopic.cctvapp.camera.CameraResolutionUtil
 import com.zektopic.cctvapp.device.DeviceStatsUtil
 import com.zektopic.cctvapp.service.RecordingsGallery
+import com.zektopic.cctvapp.settings.ServiceRuntimeState
 import com.zektopic.cctvapp.settings.ServiceSettings
 import com.zektopic.cctvapp.settings.SettingUpdateHandler
 import com.zektopic.cctvapp.settings.ServiceStateRepository
@@ -22,11 +23,6 @@ class WebServer(
     private val context: Context,
     private val ipAddress: String,
     private val imageProvider: () -> ByteArray?,
-    private val onSwitchCamera: () -> Unit,
-    private val onStartStream: () -> Unit,
-    private val onStopStream: () -> Unit,
-    private val isStreaming: () -> Boolean,
-    private val getZoomRange: () -> Pair<Float, Float>,
     port: Int = PORT
 ) : NanoHTTPD(port) {
 
@@ -39,11 +35,48 @@ class WebServer(
     }
 
     /** Same data source [com.zektopic.cctvapp.MainActivity] and the service read/write. */
-    private val settings: ServiceSettings get() = ServiceStateRepository.current
+    private val settings: ServiceSettings get() = ServiceStateRepository.settings
+
+    private val runtime: ServiceRuntimeState get() = ServiceStateRepository.runtime
+
     private val settingUpdateHandler by lazy { SettingUpdateHandler(context) }
+
+    /**
+     * The real hardware range once [CctvServerService][com.zektopic.cctvapp.service.CctvServerService]
+     * has published one via [runtime], else the generic default [CameraResolutionUtil] range.
+     */
+    private fun currentZoomRange(): Pair<Float, Float> =
+        runtime.takeIf { it.isStreaming }?.zoomRange ?: CameraResolutionUtil.getZoomRange(context)
+
+    /**
+     * Bump a request counter in [ServiceStateRepository]'s runtime `StateFlow` --
+     * [com.zektopic.cctvapp.service.CctvServerService] reacts to these *while it's
+     * running*; this alone never starts a fully-stopped service (see
+     * `CctvApplication`'s kdoc on why `WebServer` survives the service being stopped).
+     */
+    private fun requestSwitchCamera() {
+        ServiceStateRepository.updateRuntime { it.copy(switchCameraRequest = it.switchCameraRequest + 1) }
+    }
+
+    private fun requestStartStream() {
+        ServiceStateRepository.updateRuntime { it.copy(startStreamRequest = it.startStreamRequest + 1) }
+    }
+
+    private fun requestStopStream() {
+        ServiceStateRepository.updateRuntime { it.copy(stopStreamRequest = it.stopStreamRequest + 1) }
+    }
 
     /** Set at construction, i.e. service start -- backs the `/status` `uptimeMillis` field. */
     private val startElapsedRealtimeMs = SystemClock.elapsedRealtime()
+
+    /**
+     * The camera's supported resolutions don't change at runtime, but every connected
+     * dashboard's `/status` poll (every 3s) was re-querying `CameraManager` for them --
+     * computed once, lazily, on whichever thread first serves `/status`.
+     */
+    private val resolutionOptionsJson: String by lazy {
+        CameraResolutionUtil.getSupportedResolutions(context).joinToString(",") { "\"${it.first}x${it.second}\"" }
+    }
 
     override fun serve(session: IHTTPSession): Response {
         return try {
@@ -99,16 +132,16 @@ class WebServer(
         }
 
         if (uri == "/action/switch-camera") {
-            onSwitchCamera()
+            requestSwitchCamera()
             return newFixedLengthResponse(Response.Status.OK, MIME_PLAINTEXT, "Switched")
         }
-        
+
         if (uri == "/action/toggle-stream") {
-            if (isStreaming()) {
-                onStopStream()
+            if (runtime.isStreaming) {
+                requestStopStream()
                 return newFixedLengthResponse(Response.Status.OK, MIME_PLAINTEXT, "Stopped")
             } else {
-                onStartStream()
+                requestStartStream()
                 return newFixedLengthResponse(Response.Status.OK, MIME_PLAINTEXT, "Started")
             }
         }
@@ -148,17 +181,16 @@ class WebServer(
 
         // JSON status endpoint
         if (uri == "/status") {
-            val streaming = isStreaming()
+            val streaming = runtime.isStreaming
             val s = settings
-            val resolutionOptions = CameraResolutionUtil.getSupportedResolutions(context)
-                .joinToString(",") { "\"${it.first}x${it.second}\"" }
+            val zoomRange = currentZoomRange()
             val rtspUrl = buildRtspUrl()
             val json = """{
                 "streaming":$streaming,
                 "codec":"${s.videoCodec}",
                 "activeCodec":"${s.activeCodec}",
                 "resolution":"${s.videoWidth}x${s.videoHeight}",
-                "resolutionOptions":[$resolutionOptions],
+                "resolutionOptions":[$resolutionOptionsJson],
                 "authEnabled":${s.authEnabled},
                 "username":"${escapeJson(s.authUsername)}",
                 "rtspUrl":"${escapeJson(rtspUrl)}",
@@ -169,8 +201,8 @@ class WebServer(
                 "nightModeEnabled":${s.nightModeEnabled},
                 "verticalFlipEnabled":${s.verticalFlipEnabled},
                 "zoomLevel":${s.zoomLevel},
-                "zoomMin":${getZoomRange().first},
-                "zoomMax":${getZoomRange().second},
+                "zoomMin":${zoomRange.first},
+                "zoomMax":${zoomRange.second},
                 "bitrateKbps":${s.bitrateKbps},
                 "batteryLevel":${DeviceStatsUtil.getBatteryLevel(context)},
                 "isCharging":${DeviceStatsUtil.isCharging(context)},
@@ -180,6 +212,7 @@ class WebServer(
                 "uptimeMillis":${SystemClock.elapsedRealtime() - startElapsedRealtimeMs},
                 "webAuthEnabled":${s.webAuthEnabled},
                 "recordToGalleryEnabled":${s.recordToGalleryEnabled},
+                "isRecordingToGallery":${runtime.isRecordingToGallery},
                 "recordSegmentMinutes":${s.recordSegmentMinutes}
             }""".trimIndent()
             return newFixedLengthResponse(Response.Status.OK, "application/json", json)
@@ -232,9 +265,9 @@ class WebServer(
         // Legacy redirect
         if (uri.startsWith("/server/")) {
              if (uri.endsWith("on")) {
-                 onStartStream()
+                 requestStartStream()
              } else {
-                 onStopStream()
+                 requestStopStream()
              }
              val response = newFixedLengthResponse(Response.Status.REDIRECT, MIME_PLAINTEXT, "")
              response.addHeader("Location", "/")
