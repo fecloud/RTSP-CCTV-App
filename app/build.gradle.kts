@@ -1,3 +1,6 @@
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import java.util.Properties
 
 plugins {
@@ -33,6 +36,27 @@ val hasReleaseSigning = releaseStorePath != null &&
     releaseKeyPassword != null &&
     file(releaseStorePath).exists()
 
+/**
+ * Short commit hash of the checkout being built, surfaced in the dashboard footer so a
+ * running server's build can be identified without cross-referencing versionCode against
+ * CI history. Falls back to "unknown" rather than failing the build -- a source archive
+ * (no `.git`) or a `git` binary missing from PATH shouldn't block compiling.
+ */
+val gitCommitHash: String = runCatching {
+    providers.exec {
+        workingDir = rootProject.projectDir
+        commandLine("git", "rev-parse", "--short=8", "HEAD")
+    }.standardOutput.asText.get().trim()
+}.getOrDefault("unknown").ifEmpty { "unknown" }
+
+/**
+ * Wall-clock time this build was configured, in the build machine's local timezone --
+ * paired with [gitCommitHash] in the dashboard footer so two APKs built from the exact
+ * same commit (e.g. a rebuild after only changing a signing config) can still be told
+ * apart.
+ */
+val buildTimestamp: String = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US).format(Date())
+
 android {
     namespace = "com.zektopic.cctvapp"
     compileSdk {
@@ -48,6 +72,9 @@ android {
         // so a pinned versionCode made every published release un-updatable.
         versionCode = (project.findProperty("versionCode") as String?)?.toIntOrNull() ?: 1
         versionName = (project.findProperty("versionName") as String?) ?: "1.1.0"
+
+        buildConfigField("String", "GIT_COMMIT", "\"$gitCommitHash\"")
+        buildConfigField("String", "BUILD_TIME", "\"$buildTimestamp\"")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -103,6 +130,7 @@ android {
     }
     buildFeatures {
         viewBinding = true
+        buildConfig = true
     }
 
     // Workaround for third-party JNI libs that are not yet 16KB page aligned.

@@ -2,6 +2,7 @@ package com.zektopic.cctvapp.web
 
 import android.content.Context
 import android.os.SystemClock
+import com.zektopic.cctvapp.BuildConfig
 import com.zektopic.cctvapp.log.AppLog as Log
 import com.zektopic.cctvapp.camera.CameraResolutionUtil
 import com.zektopic.cctvapp.device.DeviceStatsUtil
@@ -338,6 +339,8 @@ class WebServer(
             .replace("{{RTSP_URL}}", rtspUrl)
             .replace("{{AUTH_BADGE_DISPLAY}}", authBadgeDisplay)
             .replace("{{PORT}}", PORT.toString())
+            .replace("{{COMMIT}}", BuildConfig.GIT_COMMIT)
+            .replace("{{BUILD_TIME}}", BuildConfig.BUILD_TIME)
     }
 
     private fun formatBytes(bytes: Long): String {
