@@ -83,7 +83,7 @@ class CctvServerService : Service(), ConnectChecker {
     /** Owned by this service alone -- constructed on first use, torn down in [onDestroy]. */
     private val recordingManager by lazy {
         RecordingManager(
-            context = this, rtspServerCamera
+            context = this, camera = { rtspServerCamera }
         )
     }
 

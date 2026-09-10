@@ -23,7 +23,7 @@ import kotlin.time.Duration.Companion.milliseconds
 
 class RecordingManager(
     private val context: Context,
-    private val camera: RtspServerCamera2?
+    private val camera: () -> RtspServerCamera2?
 ) {
     companion object {
         private const val TAG = "RecordingManager"
@@ -53,7 +53,7 @@ class RecordingManager(
     }
 
     fun startIfNeeded() {
-        val cam = camera ?: return
+        val cam = camera() ?: return
         if (!recordingEnabled) return
         if (!cam.isStreaming) return
         if (loopJob?.isActive == true) return
@@ -98,8 +98,9 @@ class RecordingManager(
     suspend fun stop() {
         loopJob?.cancel()
         loopJob = null
-        if (camera?.isRecording == true) {
-            withContext(Dispatchers.IO) { camera.stopRecord() }
+        val cam = camera()
+        if (cam?.isRecording == true) {
+            withContext(Dispatchers.IO) { cam.stopRecord() }
         }
         currentRecordingFile ?: return
         currentRecordingFile = null
@@ -111,8 +112,9 @@ class RecordingManager(
 
     fun shutdown() {
         loopJob?.cancel()
-        if (camera?.isRecording == true) {
-            CoroutineScope(Dispatchers.IO).launch { runCatching { camera.stopRecord() } }
+        val cam = camera()
+        if (cam?.isRecording == true) {
+            CoroutineScope(Dispatchers.IO).launch { runCatching { cam.stopRecord() } }
         }
         managerScope.cancel()
     }
