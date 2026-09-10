@@ -240,7 +240,7 @@ object AppPreferences {
 
     const val RECORD_SEGMENT_MINUTES_MIN = 1
     const val RECORD_SEGMENT_MINUTES_MAX = 60
-    const val DEFAULT_RECORD_SEGMENT_MINUTES = 5
+    const val DEFAULT_RECORD_SEGMENT_MINUTES = 1
 
     /**
      * Loop-recording retention: once local storage usage crosses this percentage,
