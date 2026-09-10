@@ -66,26 +66,10 @@ class CctvServerService : Service(), ConnectChecker {
     private var isLanternOn = false
 
     /**
-     * Backs [onMain] and every periodic/delayed loop in this service. Cancelled as a
-     * whole in [onDestroy] instead of tracking every job individually.
+     * Backs every periodic/delayed loop in this service. Cancelled as a whole in
+     * [onDestroy] instead of tracking every job individually.
      */
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-
-    /**
-     * Runs [block] on the main thread.
-     *
-     * Every WebServer callback arrives on a NanoHTTPD worker thread, but the camera
-     * calls this serializes onto the main thread are kept there out of caution rather
-     * than a documented requirement. Only the *side effects* are posted -- the state
-     * fields themselves are assigned synchronously by the caller, so a request that
-     * changes a setting still reflects the new value by the time it responds.
-     * `Dispatchers.Main.immediate` reproduces that exactly: launched from the main
-     * thread it runs synchronously (no dispatch), launched from a worker thread it posts
-     * to the main looper.
-     */
-    private fun onMain(block: () -> Unit) {
-        serviceScope.launch { block() }
-    }
     private var sensorManager: SensorManager? = null
     private var lightSensor: Sensor? = null
     private var textFilter: TextObjectFilterRender? = null
@@ -99,12 +83,7 @@ class CctvServerService : Service(), ConnectChecker {
     /** Owned by this service alone -- constructed on first use, torn down in [onDestroy]. */
     private val recordingManager by lazy {
         RecordingManager(
-            context = this,
-            onMain = ::onMain,
-            camera = { rtspServerCamera },
-            recordingEnabled = { settings.recordToGalleryEnabled },
-            recordSegmentMinutes = { settings.recordSegmentMinutes },
-            recordStorageThresholdPercent = { settings.recordStorageThresholdPercent }
+            context = this, rtspServerCamera
         )
     }
 
@@ -190,10 +169,6 @@ class CctvServerService : Service(), ConnectChecker {
         // Load saved settings as defaults (a no-op if MainActivity or CctvApplication
         // already did).
         ServiceStateRepository.ensureLoaded(this)
-
-        // Before any new segment can start: sweep away rows left by a segment the
-        // previous process never got to finish/discard (crash, OOM-kill, force-stop).
-        recordingManager.cleanupOrphanedSegments()
 
         // Setup light sensor for night mode
         sensorManager = getSystemService(SENSOR_SERVICE) as SensorManager

@@ -20,9 +20,9 @@ object RecordingsStore {
         File(context.getExternalFilesDir(null) ?: context.filesDir, "recordings").apply { mkdirs() }
 
     /**
-     * Lists finished recordings, newest first. In-progress segments are still suffixed
-     * `.mp4.part` at this point (see [RecordingManager]) so they never match `.mp4` and
-     * never show up here mid-write.
+     * Lists recordings, newest first. [RecordingManager] writes straight into the final
+     * `.mp4` name from the start of each segment, so a segment still being written shows up
+     * here too, with whatever size it's grown to so far.
      */
     fun listRecordings(context: Context): List<RecordingEntry> {
         return try {
