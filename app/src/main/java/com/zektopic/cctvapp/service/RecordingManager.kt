@@ -13,13 +13,10 @@ import java.util.Date
 import java.util.Locale
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
-import kotlin.time.Duration.Companion.milliseconds
 
 class RecordingManager(
     private val context: Context,
@@ -38,13 +35,15 @@ class RecordingManager(
 
     private val ioDispatcher = Dispatchers.IO.limitedParallelism(1)
 
-    private var loopJob: Job? = null
-
-    private var currentRecordingFile: File? = null
+    // Non-null exactly while a recording session (one SeamlessMp4RecordController installed
+    // and started) is active. Written from both the main-thread-ish call sites below and the
+    // ioDispatcher setup coroutine in startIfNeeded(), so this needs @Volatile.
+    @Volatile
+    private var activeController: SeamlessMp4RecordController? = null
 
     private val recordListener = object : RecordController.Listener {
         override fun onStatusChange(status: RecordController.Status) {
-            Log.e(TAG, "Record onStatusChange status:$status")
+            Log.d(TAG, "Record onStatusChange status:$status")
         }
 
         override fun onError(e: Exception?) {
@@ -56,62 +55,47 @@ class RecordingManager(
         val cam = camera() ?: return
         if (!recordingEnabled) return
         if (!cam.isStreaming) return
-        if (loopJob?.isActive == true) return
-        loopJob = managerScope.launch { recordingLoop(cam) }
-    }
+        if (activeController != null) return
 
-    private suspend fun recordingLoop(liveCam: RtspServerCamera2) {
-        while (recordingEnabled && liveCam.isStreaming) {
-            val file = withContext(ioDispatcher) {
-                try {
-                    createSegmentFile()
-                } catch (e: Exception) {
-                    Log.e(TAG, "Failed to create recording segment file", e)
-                    null
-                }
-            } ?: break
+        val controller = SeamlessMp4RecordController(
+            segmentDurationMinutes = { recordSegmentMinutes },
+            nextSegmentFile = { createSegmentFile() },
+        ) {
+            managerScope.launch(ioDispatcher) { enforceRetention() }
+        }
+        activeController = controller
+        cam.setRecordController(controller)
 
+        managerScope.launch(ioDispatcher) {
+            val firstFile = try {
+                createSegmentFile()
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to create recording segment file", e)
+                activeController = null
+                return@launch
+            }
             try {
-                liveCam.startRecord(file.absolutePath, recordListener)
+                cam.startRecord(firstFile.absolutePath, recordListener)
             } catch (e: Exception) {
                 Log.e(TAG, "startRecord failed", e)
-                withContext(ioDispatcher) { file.delete() }
-                break
+                activeController = null
+                return@launch
             }
-
-            currentRecordingFile = file
             ServiceStateRepository.updateRuntime { it.copy(isRecordingToGallery = true) }
-
-            delay((recordSegmentMinutes * 60_000L).milliseconds)
-
-            if (liveCam.isRecording) withContext(Dispatchers.IO) { liveCam.stopRecord() }
-
-            currentRecordingFile = null
-            ServiceStateRepository.updateRuntime { it.copy(isRecordingToGallery = false) }
-
-            withContext(ioDispatcher) {
-                enforceRetention()
-            }
         }
     }
 
     suspend fun stop() {
-        loopJob?.cancel()
-        loopJob = null
+        activeController = null
         val cam = camera()
         if (cam?.isRecording == true) {
             withContext(Dispatchers.IO) { cam.stopRecord() }
         }
-        currentRecordingFile ?: return
-        currentRecordingFile = null
         ServiceStateRepository.updateRuntime { it.copy(isRecordingToGallery = false) }
-        withContext(ioDispatcher) {
-            enforceRetention()
-        }
     }
 
     fun shutdown() {
-        loopJob?.cancel()
+        activeController = null
         val cam = camera()
         if (cam?.isRecording == true) {
             CoroutineScope(Dispatchers.IO).launch { runCatching { cam.stopRecord() } }
