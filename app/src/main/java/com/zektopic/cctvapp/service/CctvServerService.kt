@@ -105,11 +105,21 @@ class CctvServerService : Service(), ConnectChecker {
     private val timestampFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
 
     /**
+     * Confines [snapshotBuffer] compression to one thread at a time -- a `limitedParallelism(1)`
+     * view of [Dispatchers.Default] rather than a dedicated thread, so it still shares that
+     * pool's threads. [onSnapshotBitmap] hands compression off here instead of doing it inline
+     * on RootEncoder's GL thread, which would otherwise stall that thread's next frame (i.e.
+     * the RTSP stream itself) for as long as the software JPEG compression takes.
+     */
+    private val snapshotDispatcher = Dispatchers.Default.limitedParallelism(1)
+
+    /**
      * Reused across every [takeSnapshot] call instead of allocating a fresh
      * [ByteArrayOutputStream] every 500ms-3s -- pre-sized to a typical JPEG-at-quality-50
      * size to also avoid the internal buffer's own repeated grow-and-copy. Safe to reuse
-     * because `glInterface.takePhoto`'s callback runs on RootEncoder's single-thread GL
-     * executor, i.e. never concurrently with itself.
+     * because it's only ever touched from [snapshotDispatcher], which serializes access to
+     * one thread at a time -- not because of the old GL-thread callback guarantee, since
+     * compression no longer runs there.
      */
     private val snapshotBuffer = ByteArrayOutputStream(64 * 1024)
 
@@ -313,17 +323,22 @@ class CctvServerService : Service(), ConnectChecker {
     /**
      * `takePhoto()` itself only stores this as a callback and returns immediately -- this
      * runs later, asynchronously, on RootEncoder's single-thread GL executor whenever it
-     * next renders a frame. Needs its own try/catch separate from [takeSnapshot]'s (which
-     * only covers registering the callback): that one can't see anything thrown from here.
+     * next renders a frame, so it must return fast: the actual JPEG compression is software
+     * and slow enough to stall that thread's next frame (i.e. the RTSP stream itself), so it
+     * only hands the bitmap off to [snapshotDispatcher] here rather than compressing inline.
+     * Needs its own try/catch separate from [takeSnapshot]'s (which only covers registering
+     * the callback): that one can't see anything thrown from here.
      */
     private fun onSnapshotBitmap(bitmap: Bitmap) {
-        try {
-            snapshotBuffer.reset()
-            bitmap.compress(Bitmap.CompressFormat.JPEG, 50, snapshotBuffer)
-            val jpeg = snapshotBuffer.toByteArray()
-            CameraRuntimeBus.currentSnapshot.set(jpeg)
-        } catch (e: Exception) {
-            Log.e(TAG, "takeSnapshot callback failed", e)
+        serviceScope.launch(snapshotDispatcher) {
+            try {
+                snapshotBuffer.reset()
+                bitmap.compress(Bitmap.CompressFormat.JPEG, 50, snapshotBuffer)
+                CameraRuntimeBus.currentSnapshot.set(snapshotBuffer.toByteArray())
+                bitmap.recycle()
+            } catch (e: Exception) {
+                Log.e(TAG, "takeSnapshot callback failed", e)
+            }
         }
     }
 
