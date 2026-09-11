@@ -35,11 +35,8 @@ class RecordingManager(
 
     private val ioDispatcher = Dispatchers.IO.limitedParallelism(1)
 
-    // Non-null exactly while a recording session (one SeamlessMp4RecordController installed
-    // and started) is active. Written from both the main-thread-ish call sites below and the
-    // ioDispatcher setup coroutine in startIfNeeded(), so this needs @Volatile.
     @Volatile
-    private var activeController: SeamlessMp4RecordController? = null
+    private var controller: SeamlessMp4RecordController? = null
 
     private val recordListener = object : RecordController.Listener {
         override fun onStatusChange(status: RecordController.Status) {
@@ -51,34 +48,54 @@ class RecordingManager(
         }
     }
 
-    fun startIfNeeded() {
-        val cam = camera() ?: return
-        if (!recordingEnabled) return
-        if (!cam.isStreaming) return
-        if (activeController != null) return
-
-        val controller = SeamlessMp4RecordController(
+    /**
+     * Installs [controller] on [cam], creating it the first time this is called. Must be
+     * called before [cam]'s first `startStream()`/`prepareAudio()` -- RootEncoder's shared
+     * audio encoder starts with the stream, not with recording, and fires its one-time
+     * `setAudioFormat` callback almost immediately once it does (fast enough that calling this
+     * lazily from [startIfNeeded], even moments after `startStream()` returns, was still
+     * consistently too late and left every recording's audio track empty despite RTSP
+     * streaming, which bypasses `RecordController` entirely, having audio the whole time).
+     * A no-op after the first call, so it's safe for [CctvServerService] to call this
+     * unconditionally right after constructing its `RtspServerCamera2`.
+     */
+    fun attachTo(cam: RtspServerCamera2) {
+        controller?.let { return }
+        if (cam.isStreaming) {
+            // The one call site this ordering actually depends on (CctvServerService
+            // constructing RtspServerCamera2) always calls this first -- if that's ever no
+            // longer true, this is the only signal a future caller gets, since the race it
+            // misses (RootEncoder's one-time setAudioFormat callback) fails silently otherwise.
+            Log.w(TAG, "attachTo() called after the camera was already streaming; a recording started before this may be missing its audio track")
+        }
+        val created = SeamlessMp4RecordController(
             segmentDurationMinutes = { recordSegmentMinutes },
             nextSegmentFile = { createSegmentFile() },
         ) {
             managerScope.launch(ioDispatcher) { enforceRetention() }
         }
-        activeController = controller
-        cam.setRecordController(controller)
+        controller = created
+        cam.setRecordController(created)
+    }
 
+    fun startIfNeeded() {
+        val cam = camera() ?: return
+        if (!recordingEnabled) return
+        if (!cam.isStreaming) return
+        if (cam.isRecording) return
+
+        attachTo(cam)
         managerScope.launch(ioDispatcher) {
             val firstFile = try {
                 createSegmentFile()
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to create recording segment file", e)
-                activeController = null
                 return@launch
             }
             try {
                 cam.startRecord(firstFile.absolutePath, recordListener)
             } catch (e: Exception) {
                 Log.e(TAG, "startRecord failed", e)
-                activeController = null
                 return@launch
             }
             ServiceStateRepository.updateRuntime { it.copy(isRecordingToGallery = true) }
@@ -86,7 +103,6 @@ class RecordingManager(
     }
 
     suspend fun stop() {
-        activeController = null
         val cam = camera()
         if (cam?.isRecording == true) {
             withContext(Dispatchers.IO) { cam.stopRecord() }
@@ -95,7 +111,6 @@ class RecordingManager(
     }
 
     fun shutdown() {
-        activeController = null
         val cam = camera()
         if (cam?.isRecording == true) {
             CoroutineScope(Dispatchers.IO).launch { runCatching { cam.stopRecord() } }

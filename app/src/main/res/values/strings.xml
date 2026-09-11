@@ -75,8 +75,4 @@
     <string name="section_startup">Startup</string>
     <string name="auto_start_on_launch">Start when app opens</string>
 
-    <!-- Audio -->
-    <string name="audio_enabled">Stream microphone audio</string>
-    <string name="audio_enabled_summary">Off by default; requires the microphone permission</string>
-
 </resources>

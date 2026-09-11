@@ -174,6 +174,7 @@ class CctvServerService : Service(), ConnectChecker {
 
     override fun onCreate() {
         super.onCreate()
+        Log.w(TAG, "onCreate")
         ServiceNotificationUtil.createNotificationChannel(this)
 
         // Load saved settings as defaults (a no-op if MainActivity or CctvApplication
@@ -219,11 +220,11 @@ class CctvServerService : Service(), ConnectChecker {
                 ) {
                     applyAuthorization()
                 }
-                if (first || prev.audioEnabled != curr.audioEnabled) applyForegroundServiceType()
+                if (first) applyForegroundServiceType()
 
                 // State-transition triggers: pure diff only, never on `first` (see doc).
                 if (!first && (prev.videoCodec != curr.videoCodec || prev.videoWidth != curr.videoWidth ||
-                        prev.videoHeight != curr.videoHeight || prev.audioEnabled != curr.audioEnabled)
+                        prev.videoHeight != curr.videoHeight)
                 ) {
                     restartStreamIfRunning()
                 }
@@ -357,7 +358,14 @@ class CctvServerService : Service(), ConnectChecker {
 
     private fun startStream() {
         try {
-            val camera = rtspServerCamera ?: RtspServerCamera2(this, this, 8554).also { rtspServerCamera = it }
+            // recordingManager.attachTo() must run before this camera's first prepareAudio()/
+            // startStream() -- see its kdoc for why installing the record controller any later
+            // loses the race against RootEncoder's shared audio encoder's one-time format
+            // callback.
+            val camera = rtspServerCamera ?: RtspServerCamera2(this, this, 8554).also {
+                rtspServerCamera = it
+                recordingManager.attachTo(it)
+            }
 
             if (!camera.isStreaming) {
                 val maxRes = getMaxCameraResolution()
@@ -373,11 +381,10 @@ class CctvServerService : Service(), ConnectChecker {
 
                 val bitrate = settings.bitrateKbps * 1024
 
-                // Audio is opt-in. Recording it forces the microphone foreground-service
-                // type and the RECORD_AUDIO grant; a camera-only stream needs neither.
-                if (settings.audioEnabled &&
-                    ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) ==
-                        PackageManager.PERMISSION_GRANTED
+                // Audio is always on; only an actual missing RECORD_AUDIO grant falls back
+                // to a camera-only stream.
+                if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) ==
+                    PackageManager.PERMISSION_GRANTED
                 ) {
                     camera.prepareAudio(64 * 1024, 44100, true, false, false)
                 } else {
@@ -616,6 +623,7 @@ class CctvServerService : Service(), ConnectChecker {
 
     override fun onDestroy() {
         super.onDestroy()
+        Log.w(TAG, "onDestroy")
         serviceScope.cancel()
         sensorManager?.unregisterListener(lightSensorListener)
         recordingManager.shutdown()
@@ -643,16 +651,12 @@ class CctvServerService : Service(), ConnectChecker {
      * (Re-)declares which restricted resources this foreground service touches.
      *
      * The declared type must cover every one of them: recording audio under a
-     * camera-only type throws SecurityException on Android 14+. Calling
-     * startForeground again on an already-foreground service updates the type in
-     * place, which is what lets the audio toggle take effect without a restart.
+     * camera-only type throws SecurityException on Android 14+.
      */
     private fun applyForegroundServiceType() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            var serviceType = ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
-            if (settings.audioEnabled) {
-                serviceType = serviceType or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
-            }
+            val serviceType = ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA or
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
             startForeground(
                 ServiceNotificationUtil.SERVER_NOTIFICATION_ID,
                 ServiceNotificationUtil.buildServerNotification(this),

@@ -208,20 +208,6 @@ object AppPreferences {
         return password
     }
 
-    // --- Audio ---
-    private const val KEY_AUDIO_ENABLED = "audio_enabled"
-
-    /**
-     * Off by default. Enabling it makes the service claim the microphone
-     * foreground-service type and require the RECORD_AUDIO grant.
-     */
-    fun getAudioEnabled(context: Context): Boolean =
-        prefs(context).getBoolean(KEY_AUDIO_ENABLED, false)
-
-    fun setAudioEnabled(context: Context, enabled: Boolean) {
-        prefs(context).edit { putBoolean(KEY_AUDIO_ENABLED, enabled) }
-    }
-
     // --- Startup behaviour ---
     private const val KEY_AUTO_START_ON_LAUNCH = "auto_start_on_launch"
 

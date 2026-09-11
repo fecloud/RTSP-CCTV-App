@@ -43,8 +43,6 @@ class SettingUpdateHandler(private val context: Context) {
                 val coerced = requested.coerceIn(AppPreferences.BITRATE_MIN_KBPS, AppPreferences.BITRATE_MAX_KBPS)
                 ServiceStateRepository.updateSettings(context) { it.copy(bitrateKbps = coerced) }
             }
-            "audio_enabled" ->
-                ServiceStateRepository.updateSettings(context) { it.copy(audioEnabled = value.toBoolean()) }
             "web_auth_enabled" ->
                 ServiceStateRepository.updateSettings(context) { it.copy(webAuthEnabled = value.toBoolean()) }
             "record_to_gallery_enabled" ->

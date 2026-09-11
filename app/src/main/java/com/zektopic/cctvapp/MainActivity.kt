@@ -14,7 +14,6 @@ import android.os.Bundle
 import android.os.PowerManager
 import android.provider.Settings
 import android.widget.ArrayAdapter
-import android.widget.AutoCompleteTextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
@@ -41,8 +40,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
 
     /**
-     * CAMERA is the only hard requirement. RECORD_AUDIO is requested alongside it so the
-     * optional audio toggle works without a second prompt, POST_NOTIFICATIONS is needed
+     * CAMERA is the only hard requirement. RECORD_AUDIO is requested alongside it because
+     * the stream always includes microphone audio, POST_NOTIFICATIONS is needed
      * from API 33 for the foreground-service notification to appear at all, and
      * ACCESS_FINE_LOCATION is requested because Android 8.1+ won't hand back a real
      * Wi-Fi RSSI to an app without it (see DeviceStatsUtil.getWifiStrength) -- without
@@ -108,23 +107,23 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupSpinners() {
-        (binding.spinnerResolution as? AutoCompleteTextView)?.setAdapter(
+        binding.spinnerResolution.setAdapter(
             ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, resolutions)
         )
 
-        (binding.spinnerCodec as? AutoCompleteTextView)?.setAdapter(
+        binding.spinnerCodec.setAdapter(
             ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, codecs)
         )
 
-        (binding.spinnerOverlayPosition as? AutoCompleteTextView)?.setAdapter(
+        binding.spinnerOverlayPosition.setAdapter(
             ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, overlayPositions)
         )
 
-        (binding.spinnerOverlaySize as? AutoCompleteTextView)?.setAdapter(
+        binding.spinnerOverlaySize.setAdapter(
             ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, overlaySizes)
         )
 
-        (binding.spinnerBitrate as? AutoCompleteTextView)?.setAdapter(
+        binding.spinnerBitrate.setAdapter(
             ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, bitrateLabels)
         )
     }
@@ -133,20 +132,20 @@ class MainActivity : AppCompatActivity() {
         val s = ServiceStateRepository.settings
 
         // Load saved codec
-        (binding.spinnerCodec as? AutoCompleteTextView)?.setText(
+        binding.spinnerCodec.setText(
             if (s.videoCodec in codecs) s.videoCodec else codecs.first(), false
         )
 
         // Load saved resolution
         val savedResolution = "${s.videoWidth}x${s.videoHeight}"
-        (binding.spinnerResolution as? AutoCompleteTextView)?.setText(
+        binding.spinnerResolution.setText(
             if (savedResolution in resolutions) savedResolution else resolutions.first(), false
         )
 
         // Load saved bitrate
         val savedBitrateIndex = bitrateKbpsValues.indexOf(s.bitrateKbps)
             .let { if (it >= 0) it else bitrateKbpsValues.indexOf(AppPreferences.DEFAULT_BITRATE_KBPS) }
-        (binding.spinnerBitrate as? AutoCompleteTextView)?.setText(bitrateLabels[savedBitrateIndex], false)
+        binding.spinnerBitrate.setText(bitrateLabels[savedBitrateIndex], false)
 
         // Load saved auth settings
         binding.switchAuth.isChecked = s.authEnabled
@@ -156,10 +155,10 @@ class MainActivity : AppCompatActivity() {
 
         // Load saved overlay settings
         binding.switchTimestamp.isChecked = s.showTimestamp
-        (binding.spinnerOverlayPosition as? AutoCompleteTextView)?.setText(
+        binding.spinnerOverlayPosition.setText(
             if (s.timestampPosition in overlayPositions) s.timestampPosition else overlayPositions.first(), false
         )
-        (binding.spinnerOverlaySize as? AutoCompleteTextView)?.setText(
+        binding.spinnerOverlaySize.setText(
             if (s.timestampSize in overlaySizes) s.timestampSize else overlaySizes[1], false
         )
 
@@ -172,7 +171,6 @@ class MainActivity : AppCompatActivity() {
 
         // Load security settings
         binding.switchWebAuth.isChecked = s.webAuthEnabled
-        binding.switchAudio.isChecked = s.audioEnabled
 
         // Startup behavior flags aren't part of ServiceSettings -- the service never
         // reads them, so they stay direct AppPreferences reads.
@@ -214,16 +212,16 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        (binding.spinnerResolution as? AutoCompleteTextView)?.setOnItemClickListener { _, _, position, _ ->
+        binding.spinnerResolution.setOnItemClickListener { _, _, position, _ ->
             val (width, height) = parseResolution(resolutions[position])
             ServiceStateRepository.updateSettings(this) { it.copy(videoWidth = width, videoHeight = height) }
         }
 
-        (binding.spinnerCodec as? AutoCompleteTextView)?.setOnItemClickListener { _, _, position, _ ->
+        binding.spinnerCodec.setOnItemClickListener { _, _, position, _ ->
             ServiceStateRepository.updateSettings(this) { it.copy(videoCodec = codecs[position]) }
         }
 
-        (binding.spinnerBitrate as? AutoCompleteTextView)?.setOnItemClickListener { _, _, position, _ ->
+        binding.spinnerBitrate.setOnItemClickListener { _, _, position, _ ->
             val kbps = bitrateKbpsValues[position]
             ServiceStateRepository.updateSettings(this) { it.copy(bitrateKbps = kbps) }
         }
@@ -257,11 +255,11 @@ class MainActivity : AppCompatActivity() {
             ServiceStateRepository.updateSettings(this) { it.copy(showTimestamp = isChecked) }
         }
 
-        (binding.spinnerOverlayPosition as? AutoCompleteTextView)?.setOnItemClickListener { _, _, position, _ ->
+        binding.spinnerOverlayPosition.setOnItemClickListener { _, _, position, _ ->
             ServiceStateRepository.updateSettings(this) { it.copy(timestampPosition = overlayPositions[position]) }
         }
 
-        (binding.spinnerOverlaySize as? AutoCompleteTextView)?.setOnItemClickListener { _, _, position, _ ->
+        binding.spinnerOverlaySize.setOnItemClickListener { _, _, position, _ ->
             ServiceStateRepository.updateSettings(this) { it.copy(timestampSize = overlaySizes[position]) }
         }
 
@@ -292,10 +290,6 @@ class MainActivity : AppCompatActivity() {
         binding.switchWebAuth.setOnCheckedChangeListener { _, isChecked ->
             ServiceStateRepository.updateSettings(this) { it.copy(webAuthEnabled = isChecked) }
             if (isChecked) showGeneratedPasswordIfAny()
-        }
-
-        binding.switchAudio.setOnCheckedChangeListener { _, isChecked ->
-            ServiceStateRepository.updateSettings(this) { it.copy(audioEnabled = isChecked) }
         }
 
         binding.switchAutoStart.setOnCheckedChangeListener { _, isChecked ->

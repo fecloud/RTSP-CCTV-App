@@ -71,7 +71,6 @@ object ServiceStateRepository {
         AppPreferences.setUsername(context, s.authUsername)
         AppPreferences.setPassword(context, s.authPassword)
         AppPreferences.setWebAuthEnabled(context, s.webAuthEnabled)
-        AppPreferences.setAudioEnabled(context, s.audioEnabled)
         AppPreferences.setShowTimestamp(context, s.showTimestamp)
         AppPreferences.setTimestampPosition(context, s.timestampPosition)
         AppPreferences.setTimestampSize(context, s.timestampSize)

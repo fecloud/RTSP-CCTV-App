@@ -43,6 +43,18 @@ class SeamlessMp4RecordController(
         private const val H264_IDR = 5
         private const val H265_IDR_W_RADL = 19
         private const val H265_IDR_N_LP = 20
+
+        // RootEncoder's Camera2Base.startRecord(path, listener) infers RecordTracks.ALL from its
+        // own `audioInitialized` flag, which (per Camera2Base source) latches true forever once
+        // any earlier prepareAudio() succeeded and is never reset by a later failed prepareAudio()
+        // or by disableAudio() -- so a segment can be told to expect an audio track that this
+        // session's audio pipeline will in fact never produce a format for (mic grabbed by
+        // another app, blocked by the OEM's background-mic restrictions, etc). Without a bound,
+        // that leaves [openMuxer] waiting forever: every keyframe re-checks `audioFormat == null`
+        // and bails, so `muxerStarted` never becomes true and no file is ever produced -- silently,
+        // since that early return logs nothing. Capping the wait lets a segment fall back to
+        // video-only once it's clearly not coming, rather than recording nothing at all.
+        private const val AUDIO_FORMAT_TIMEOUT_MS = 3_000L
     }
 
     // Closing a MediaMuxer (writing its moov atom) can take a moment; doing it here instead of
@@ -84,6 +96,10 @@ class SeamlessMp4RecordController(
 
     private var pendingFile: File? = null
 
+    // Wall-clock time [pendingFile] was set, used only to bound how long a segment will wait for
+    // an audio format before opening video-only -- see [AUDIO_FORMAT_TIMEOUT_MS].
+    private var pendingSinceElapsedMs = 0L
+
     @Synchronized
     override fun startRecord(path: String, listener: RecordController.Listener?, tracks: RecordController.RecordTracks) {
         this.listener = listener
@@ -91,6 +107,7 @@ class SeamlessMp4RecordController(
         status = RecordController.Status.STARTED
         listener?.onStatusChange(status)
         pendingFile = File(path)
+        pendingSinceElapsedMs = SystemClock.elapsedRealtime()
         requestKeyFrame?.onRequestKeyFrame()
     }
 
@@ -120,6 +137,7 @@ class SeamlessMp4RecordController(
             }
             if (file != null) {
                 pendingFile = file
+                pendingSinceElapsedMs = SystemClock.elapsedRealtime()
                 requestKeyFrame?.onRequestKeyFrame()
             }
         }
@@ -128,6 +146,13 @@ class SeamlessMp4RecordController(
         val nextFile = pendingFile
         if (nextFile != null) {
             if (!keyFrame) return
+            val audioMissing = tracks != RecordController.RecordTracks.VIDEO && audioFormat == null
+            if (audioMissing && millisSince(pendingSinceElapsedMs) < AUDIO_FORMAT_TIMEOUT_MS) {
+                return // give the audio pipeline a bit longer; retried on the next keyframe.
+            }
+            if (audioMissing) {
+                Log.w(TAG, "No audio format after ${AUDIO_FORMAT_TIMEOUT_MS}ms, starting $nextFile video-only")
+            }
             if (!openMuxer(nextFile, videoInfo.presentationTimeUs)) return
             pendingFile = null
             segmentStartElapsedMs = SystemClock.elapsedRealtime()
@@ -140,9 +165,11 @@ class SeamlessMp4RecordController(
         if (muxerStarted) writeSample(videoTrack, videoBuffer, videoInfo)
     }
 
+    private fun millisSince(markElapsedMs: Long) = SystemClock.elapsedRealtime() - markElapsedMs
+
     private fun currentSegmentExpired(): Boolean {
         val durationMs = segmentDurationMinutes() * 60_000L
-        return SystemClock.elapsedRealtime() - segmentStartElapsedMs >= durationMs
+        return millisSince(segmentStartElapsedMs) >= durationMs
     }
 
     @Synchronized
@@ -211,10 +238,13 @@ class SeamlessMp4RecordController(
         }
     }
 
-    /** Always called from inside an already-@Synchronized method. */
+    /**
+     * Always called from inside an already-@Synchronized method. Opens without an audio track
+     * if [audioFormat] isn't available yet -- by the time this is called, [recordVideo] has
+     * already decided (via [AUDIO_FORMAT_TIMEOUT_MS]) that it's not worth waiting any longer.
+     */
     private fun openMuxer(file: File, firstSampleTimeUs: Long): Boolean {
         val vFormat = videoFormat ?: return false
-        if (tracks != RecordController.RecordTracks.VIDEO && audioFormat == null) return false
 
         val newMuxer = try {
             MediaMuxer(file.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)

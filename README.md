@@ -57,8 +57,8 @@ NVR can consume, and keeps every frame on your own network.
   encoder limits)
 - **Bitrate** adjustable via slider (500–8000 kbps), live while streaming, in both the
   app and the web dashboard
-- **Optional audio** — off by default, so the app does not claim the microphone unless
-  you ask it to
+- **Microphone audio** included in the stream whenever the RECORD_AUDIO permission is
+  granted
 - **Background operation** via a foreground service; keeps streaming with the screen off
 - **Front/back camera switching**, from the app, the dashboard, or the API
 
@@ -150,7 +150,6 @@ This app puts a camera on your network. The defaults are chosen accordingly.
 | RTSP authentication | Off | Enable under *Authentication*; applies to the RTSP stream. |
 | Cross-origin requests | **Rejected** | Stops a website you visit from driving the camera over your LAN. |
 | Credentials in cloud backup | **Excluded** | Preferences and snapshots are excluded from Auto Backup and device transfer. |
-| Audio capture | **Off** | The microphone is only claimed when you enable it. |
 | Start when app opens | **Off** | Opt-in. Opening the app no longer starts streaming by itself. |
 
 ### What you should still do
@@ -229,7 +228,6 @@ cross-origin `Origin` header are rejected with `403`.
 | `vertical_flip_enabled` | bool | Flip stream/snapshot for an upside-down mount |
 | `zoom_level` | float 1.0–8.0 | Camera digital zoom factor |
 | `bitrate_kbps` | int 500–8000 | Video bitrate, applied live while streaming |
-| `audio_enabled` | bool | Include microphone audio in the stream |
 | `web_auth_enabled` | bool | Require authentication on port 8081 |
 | `record_to_gallery_enabled` | bool | Record rotating segments to the app's private storage, browsable via `/recordings` |
 | `record_segment_minutes` | int 1–60 | Length of each recorded segment |
@@ -247,7 +245,7 @@ cross-origin `Origin` header are rejected with `403`.
 | `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` | **Yes** | Starting the server also asks to be exempted from battery optimization — without it, OEM battery management is free to kill the camera in the background. |
 | `INTERNET`, `ACCESS_NETWORK_STATE` | Yes | Running the local RTSP and HTTP servers, and reporting the device IP. |
 | `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_CAMERA` | Yes | Long-running capture. |
-| `RECORD_AUDIO`, `FOREGROUND_SERVICE_MICROPHONE` | Only with audio on | Audio is opt-in; the microphone type is only claimed when you enable it. |
+| `RECORD_AUDIO`, `FOREGROUND_SERVICE_MICROPHONE` | Yes | Microphone audio is always included in the stream when granted; falls back to camera-only if denied. |
 | `POST_NOTIFICATIONS` | Recommended | Android 13+. Without it the service notification is suppressed and you lose the visible indicator that the camera is live. |
 | `ACCESS_WIFI_STATE`, `ACCESS_FINE_LOCATION` | Optional | Wi-Fi signal readout on the dashboard. Android 8.1+ hands back a placeholder RSSI (so the dashboard shows no signal) unless the app has location permission *and* the device's system location toggle is on. |
 
