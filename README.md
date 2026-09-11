@@ -78,23 +78,24 @@ NVR can consume, and keeps every frame on your own network.
 ```mermaid
 flowchart LR
     CAM[Camera2 + OpenGL surface] --> ENC[Hardware encoder<br/>H.264 / H.265]
-    CAM --> SNAP[JPEG snapshot loop<br/>throttled when idle]
+    CAM --> WEBRTC[WebRTC video/audio track<br/>one camera/mic tap, any number of viewers]
 
     ENC --> RTSP[RTSP server<br/>:8554]
-    SNAP --> WEB[Web server<br/>:8081]
+    WEBRTC --> WS[WebSocket signaling<br/>:8081/ws]
 
     RTSP --> NVR[VLC / OBS / Frigate / NVR]
-    WEB --> BROWSER[Browser dashboard]
+    WS --> BROWSER[Browser dashboard<br/>RTCPeerConnection]
 ```
 
 Everything runs inside one foreground service. The RTSP stream comes straight off the
-hardware encoder; the dashboard shares a single JPEG capture loop, which idles
-automatically when nobody is watching.
+hardware encoder; the dashboard's live preview is WebRTC, sharing the same camera/mic
+capture across every connected browser tab rather than opening it once per viewer.
 
 | Component | File |
 |---|---|
 | Foreground service, camera, stream lifecycle | `CctvServerService.kt` |
-| HTTP server and dashboard | `WebServer.kt` |
+| HTTP server, dashboard and WebSocket signaling | `WebServer.kt` |
+| Camera-to-WebRTC bridge and per-viewer `PeerConnection` | `WebRtcVideoBridge.kt`, `WebRtcSignalingSocket.kt` |
 | Authentication, CSRF and HTML escaping | `WebAuth.kt` |
 | Settings | `AppPreferences.kt` |
 
@@ -199,7 +200,6 @@ cross-origin `Origin` header are rejected with `403`.
 | Endpoint | Returns |
 |---|---|
 | `GET /` | The dashboard |
-| `GET /shot.jpg` | Current JPEG snapshot |
 | `GET /status` | JSON status: streaming state, codec, resolution, every setting, battery, Wi-Fi |
 | `GET /recordings` | HTML page listing saved recordings, newest first |
 | `GET /recording.mp4?id=<id>[&download=1]` | Streams a recording inline, or forces download with `download=1` |
@@ -215,6 +215,32 @@ cross-origin `Origin` header are rejected with `403`.
 | `POST /action/set-setting` | `key=<key>&value=<value>` |
 | `POST /action/set-auth` | `enabled=<bool>&username=<s>&password=<s>` |
 
+### Live preview (WebRTC)
+
+The dashboard's live preview is WebRTC, not a plain HTTP endpoint: `WS /ws` is a signaling
+channel (subject to the same Origin/Basic-Auth checks as every route above, checked once
+against the WebSocket upgrade request's headers). One browser tab opens one `/ws`
+connection and gets its own `RTCPeerConnection`, but every connection shares the same
+camera/microphone capture -- any number of tabs can watch at once without opening the
+camera or mic more than once. There is no STUN/TURN server configured (this app is
+LAN-only by design, see "Security" above), so it only works between devices that can reach
+each other directly.
+
+Messages are plain JSON, one object per WebSocket text frame:
+
+```jsonc
+// Browser -> phone, once on connect
+{"type": "offer", "sdp": "..."}
+// Phone -> browser, in reply
+{"type": "answer", "sdp": "..."}
+// Either direction, as ICE candidates are discovered
+{"type": "candidate", "candidate": "...", "sdpMid": "...", "sdpMLineIndex": 0}
+```
+
+If the camera isn't currently streaming, the server closes the socket immediately
+(`GoingAway`) rather than accepting an offer it has nothing to answer with -- see
+`app/src/main/assets/web/dashboard.html`'s client script, which just reconnects on a timer.
+
 <details>
 <summary><b>Keys accepted by <code>/action/set-setting</code></b></summary>
 
@@ -225,7 +251,7 @@ cross-origin `Origin` header are rejected with `403`.
 | `timestamp_size` | `Small` \| `Medium` \| `Large` | Overlay text size |
 | `flashlight_enabled` | bool | Torch |
 | `night_mode_enabled` | bool | Automatic torch by ambient light |
-| `vertical_flip_enabled` | bool | Flip stream/snapshot for an upside-down mount |
+| `vertical_flip_enabled` | bool | Flip stream/preview for an upside-down mount |
 | `zoom_level` | float 1.0–8.0 | Camera digital zoom factor |
 | `bitrate_kbps` | int 500–8000 | Video bitrate, applied live while streaming |
 | `web_auth_enabled` | bool | Require authentication on port 8081 |

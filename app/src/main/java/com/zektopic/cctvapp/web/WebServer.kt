@@ -11,8 +11,8 @@ import com.zektopic.cctvapp.settings.ServiceRuntimeState
 import com.zektopic.cctvapp.settings.ServiceSettings
 import com.zektopic.cctvapp.settings.SettingUpdateHandler
 import com.zektopic.cctvapp.settings.ServiceStateRepository
-import fi.iki.elonen.NanoHTTPD
-import java.io.ByteArrayInputStream
+import com.zektopic.cctvapp.webrtc.WebRtcSignalingSocket
+import fi.iki.elonen.NanoWSD
 import java.io.InputStream
 import java.text.SimpleDateFormat
 import java.util.Locale
@@ -22,10 +22,10 @@ data class RecordingEntry(val id: String, val displayName: String, val sizeBytes
 
 class WebServer(
     private val context: Context,
-    private val ipAddress: String,
-    private val imageProvider: () -> ByteArray?,
     port: Int = PORT
-) : NanoHTTPD(port) {
+) : NanoWSD(port) {
+
+    private val ipAddress: String get() = DeviceStatsUtil.getIpAddress(context)
 
     companion object {
         const val PORT = 8081
@@ -79,7 +79,7 @@ class WebServer(
         CameraResolutionUtil.getSupportedResolutions(context).joinToString(",") { "\"${it.first}x${it.second}\"" }
     }
 
-    override fun serve(session: IHTTPSession): Response {
+    override fun serveHttp(session: IHTTPSession): Response {
         return try {
             val headers = session.headers ?: emptyMap()
 
@@ -112,6 +112,21 @@ class WebServer(
         }
     }
 
+    /**
+     * `/ws` is the only WebSocket route; [WebAuth]'s Origin/Basic-Auth checks run here
+     * (from the handshake request's headers) exactly like every HTTP route above -- see
+     * [WebRtcSignalingSocket]'s kdoc for why the actual rejection has to happen after the
+     * handshake completes rather than by returning something else from here.
+     */
+    override fun openWebSocket(handshake: IHTTPSession): WebSocket {
+        val headers = handshake.headers ?: emptyMap()
+        val authorized = WebAuth.isOriginAllowed(headers["origin"], headers["host"]) &&
+            WebAuth.isAuthorized(
+                settings.webAuthEnabled, settings.authUsername, settings.authPassword, headers["authorization"]
+            )
+        return WebRtcSignalingSocket(handshake, authorized)
+    }
+
     private fun unauthorized(): Response {
         val response = newFixedLengthResponse(
             Response.Status.UNAUTHORIZED, MIME_PLAINTEXT, "Authentication required"
@@ -122,15 +137,6 @@ class WebServer(
 
     private fun processRequest(session: IHTTPSession): Response {
         val uri = session.uri
-
-        if (uri == "/shot.jpg") {
-            val imageBytes = imageProvider()
-            return if (imageBytes != null) {
-                newFixedLengthResponse(Response.Status.OK, "image/jpeg", ByteArrayInputStream(imageBytes), imageBytes.size.toLong())
-            } else {
-                newFixedLengthResponse(Response.Status.NOT_FOUND, MIME_PLAINTEXT, "Camera not ready")
-            }
-        }
 
         if (uri == "/action/switch-camera") {
             requestSwitchCamera()

@@ -4,9 +4,7 @@ import android.app.Application
 import android.content.pm.ApplicationInfo
 import com.zektopic.cctvapp.log.AppLog as Log
 import com.tencent.bugly.crashreport.CrashReport
-import com.zektopic.cctvapp.device.DeviceStatsUtil
 import com.zektopic.cctvapp.log.AppLog
-import com.zektopic.cctvapp.service.CameraRuntimeBus
 import com.zektopic.cctvapp.settings.ServiceStateRepository
 import com.zektopic.cctvapp.web.WebServer
 
@@ -20,19 +18,17 @@ class CctvApplication : Application() {
      * Moved here from `CctvServerService` so the dashboard survives that service being
      * fully stopped -- previously `WebServer.start()`/`.stop()` were tied to the
      * service's own `onCreate`/`onDestroy`, so stopping the service killed the dashboard
-     * along with it. [imageProvider] is the one callback `WebServer` still needs from
-     * outside: it reads [CameraRuntimeBus], a `.service`-package singleton `WebServer`
-     * (in `.web`) has no direct visibility into. Every other cross-cutting concern
-     * (settings, start/stop/switch-camera commands, zoom range) goes through
-     * [ServiceStateRepository], which `WebServer` already reads/writes directly.
+     * along with it. Every cross-cutting concern (settings, start/stop/switch-camera
+     * commands, zoom range) goes through [ServiceStateRepository], which `WebServer`
+     * already reads/writes directly; the live WebRTC camera/mic tap goes through
+     * `WebRtcBus` instead (see `WebRtcSignalingSocket`'s kdoc), for the same reason
+     * `CameraRuntimeBus` used to exist for the old JPEG snapshot feed. `WebServer` reads
+     * its own IP address live off [com.zektopic.cctvapp.device.DeviceStatsUtil] on every
+     * request rather than taking one here, since it can change at any point over this
+     * long-lived server's lifetime.
      */
     private val webServer: WebServer by lazy {
-        WebServer(this, DeviceStatsUtil.getIpAddress(this),
-            imageProvider = {
-                CameraRuntimeBus.lastSnapshotRequestMs = System.currentTimeMillis()
-                CameraRuntimeBus.currentSnapshot.get()
-            },
-        )
+        WebServer(this)
     }
 
     override fun onCreate() {

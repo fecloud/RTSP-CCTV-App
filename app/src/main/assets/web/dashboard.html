@@ -103,7 +103,8 @@
             align-items: center;
             justify-content: center;
         }
-        .preview-wrapper img {
+        .preview-wrapper img,
+        .preview-wrapper video {
             width: 100%;
             height: 100%;
             object-fit: contain;
@@ -406,11 +407,12 @@
         <!-- Preview -->
         <div class="preview-card">
             <div class="preview-wrapper">
-                <img id="cam-preview" src="/shot.jpg" alt="Live Preview" />
+                <video id="cam-preview" autoplay playsinline muted></video>
                 <div class="preview-overlay">
                     <span class="chip" id="chipRec" style="display:none;color:var(--danger);">● REC</span>
                     <span class="chip" id="chipCodec">—</span>
                     <span class="chip" id="chipRes">—</span>
+                    <span class="chip" id="btnUnmute" onclick="toggleMute()" style="cursor:pointer;">🔇 Unmute</span>
                 </div>
             </div>
             <div class="controls">
@@ -637,14 +639,75 @@
                 .then(() => { showToast('Bitrate: ' + v + ' kbps'); fetchStatus(); });
         }
 
-        // --- Preview auto-refresh ---
-        const img = document.getElementById('cam-preview');
-        setInterval(() => {
-            const newImg = new Image();
-            newImg.onload = () => { img.src = newImg.src; };
-            newImg.src = '/shot.jpg?t=' + Date.now();
-        }, 500);
-        
+        // --- WebRTC live preview ---
+        // Signaling is plain JSON over /ws (see WebRtcSignalingSocket.kt for the exact
+        // message shapes) -- not a standard, just whatever the two ends agree on. No STUN
+        // server is configured: this dashboard only ever talks to the phone over the LAN,
+        // so a host ICE candidate is always enough.
+        let webRtcPc = null;
+        let webRtcWs = null;
+
+        function startWebRtcPreview() {
+            const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+            webRtcWs = new WebSocket(wsProtocol + '//' + location.host + '/ws');
+            webRtcPc = new RTCPeerConnection({ iceServers: [] });
+            // recvonly transceivers: this page only ever watches, it never sends its own
+            // camera/mic -- without these, createOffer() below would produce an SDP with
+            // no video/audio m-lines at all, since Unified Plan only includes one per
+            // added track or explicitly created transceiver.
+            webRtcPc.addTransceiver('video', { direction: 'recvonly' });
+            webRtcPc.addTransceiver('audio', { direction: 'recvonly' });
+
+            webRtcPc.ontrack = (event) => {
+                const video = document.getElementById('cam-preview');
+                if (video.srcObject !== event.streams[0]) video.srcObject = event.streams[0];
+            };
+            webRtcPc.onicecandidate = (event) => {
+                if (event.candidate) {
+                    webRtcWs.send(JSON.stringify({
+                        type: 'candidate',
+                        candidate: event.candidate.candidate,
+                        sdpMid: event.candidate.sdpMid,
+                        sdpMLineIndex: event.candidate.sdpMLineIndex
+                    }));
+                }
+            };
+
+            webRtcWs.onopen = async () => {
+                const offer = await webRtcPc.createOffer();
+                await webRtcPc.setLocalDescription(offer);
+                webRtcWs.send(JSON.stringify({ type: 'offer', sdp: offer.sdp }));
+            };
+            webRtcWs.onmessage = async (event) => {
+                const msg = JSON.parse(event.data);
+                if (msg.type === 'answer') {
+                    await webRtcPc.setRemoteDescription({ type: 'answer', sdp: msg.sdp });
+                } else if (msg.type === 'candidate') {
+                    try {
+                        await webRtcPc.addIceCandidate({
+                            candidate: msg.candidate, sdpMid: msg.sdpMid, sdpMLineIndex: msg.sdpMLineIndex
+                        });
+                    } catch (e) { console.error('addIceCandidate failed', e); }
+                }
+            };
+            // Reconnects on close for any reason -- including the phone not streaming yet
+            // (the server closes with GoingAway in that case) -- on a fixed delay rather
+            // than exponential backoff, since this is one device on a LAN, not a public
+            // service worth being gentle with.
+            webRtcWs.onclose = () => {
+                if (webRtcPc) { webRtcPc.close(); webRtcPc = null; }
+                setTimeout(startWebRtcPreview, 2000);
+            };
+            webRtcWs.onerror = () => { webRtcWs.close(); };
+        }
+        startWebRtcPreview();
+
+        function toggleMute() {
+            const video = document.getElementById('cam-preview');
+            video.muted = !video.muted;
+            document.getElementById('btnUnmute').textContent = video.muted ? '🔇 Unmute' : '🔊 Mute';
+        }
+
         // --- Resolution options ---
         // Populated once from the camera's real supported sizes (falls back to a
         // small static list if the device somehow reports none), then left alone --

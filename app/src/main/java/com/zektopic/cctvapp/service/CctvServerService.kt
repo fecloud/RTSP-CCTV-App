@@ -5,7 +5,6 @@ import android.app.Service
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
-import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.Typeface
 import android.hardware.Sensor
@@ -19,14 +18,18 @@ import com.zektopic.cctvapp.log.AppLog as Log
 import com.pedro.common.ConnectChecker
 import com.pedro.common.VideoCodec
 import com.pedro.encoder.input.gl.render.filters.`object`.TextObjectFilterRender
+import com.pedro.encoder.input.sources.audio.MicrophoneSource
+import com.pedro.encoder.input.sources.audio.NoAudioSource
+import com.pedro.encoder.input.sources.video.Camera2Source
 import com.pedro.encoder.utils.CodecUtil
-import com.pedro.rtspserver.RtspServerCamera2
+import com.pedro.rtspserver.RtspServerStream
 import com.zektopic.cctvapp.camera.CameraResolutionUtil
 import com.zektopic.cctvapp.device.DeviceStatsUtil
 import com.zektopic.cctvapp.settings.ServiceRuntimeState
 import com.zektopic.cctvapp.settings.ServiceSettings
 import com.zektopic.cctvapp.settings.ServiceStateRepository
-import java.io.ByteArrayOutputStream
+import com.zektopic.cctvapp.webrtc.WebRtcBus
+import com.zektopic.cctvapp.webrtc.WebRtcVideoBridge
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -45,21 +48,36 @@ class CctvServerService : Service(), ConnectChecker {
 
     companion object {
         private const val TAG = "CctvServerService"
-
-        /** Capture cadence while the dashboard is open. */
-        private const val ACTIVE_SNAPSHOT_INTERVAL_MS = 500L
-        /** Heartbeat while nothing needs frames -- just enough to notice a new viewer. */
-        private const val IDLE_SNAPSHOT_INTERVAL_MS = 3000L
-        /** How long after the last /shot.jpg we keep treating a viewer as present. */
-        private const val VIEWER_IDLE_TIMEOUT_MS = 10_000L
     }
 
     /** Null before the first [startStream] call. */
-    private var rtspServerCamera: RtspServerCamera2? = null
+    private var rtspStream: RtspServerStream? = null
+
+    /**
+     * The camera-specific controls ([Camera2Source.switchCamera], lantern, zoom) that
+     * [RtspServerStream] no longer re-exposes as pass-through methods now that its video
+     * source is a generic, swappable [com.pedro.encoder.input.sources.video.VideoSource] --
+     * constructed together with [rtspStream] in [startStream] and never swapped afterward,
+     * so both fields are always either both null or both non-null.
+     */
+    private var camera2Source: Camera2Source? = null
+
+    /**
+     * Null until the first successful [startStream] -- created there, never recreated, and
+     * torn down only in [onDestroy]. Published through [WebRtcBus] so `WebServer`'s
+     * WebSocket signaling handler (a different package, owned by `CctvApplication` rather
+     * than this service) can reach it.
+     */
+    private var webRtcBridge: WebRtcVideoBridge? = null
+
+    private fun ensureWebRtcBridge(): WebRtcVideoBridge = webRtcBridge ?: WebRtcVideoBridge(applicationContext).also {
+        webRtcBridge = it
+        WebRtcBus.bridge.set(it)
+    }
 
     /** True only once the camera exists and is actively streaming. */
     private val isCameraStreaming: Boolean
-        get() = rtspServerCamera?.isStreaming == true
+        get() = rtspStream?.isStreaming == true
 
     private val settings: ServiceSettings get() = ServiceStateRepository.settings
 
@@ -77,13 +95,10 @@ class CctvServerService : Service(), ConnectChecker {
     /** Ticks [updateTimestampText] every second while the timestamp overlay is enabled. */
     private var timestampJob: Job? = null
 
-    /** Runs [startSnapshotLoop]'s loop only while the camera is actually streaming. */
-    private var snapshotJob: Job? = null
-
     /** Owned by this service alone -- constructed on first use, torn down in [onDestroy]. */
     private val recordingManager by lazy {
         RecordingManager(
-            context = this, camera = { rtspServerCamera }
+            context = this, camera = { rtspStream }
         )
     }
 
@@ -104,25 +119,6 @@ class CctvServerService : Service(), ConnectChecker {
 
     private val timestampFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
 
-    /**
-     * Confines [snapshotBuffer] compression to one thread at a time -- a `limitedParallelism(1)`
-     * view of [Dispatchers.Default] rather than a dedicated thread, so it still shares that
-     * pool's threads. [onSnapshotBitmap] hands compression off here instead of doing it inline
-     * on RootEncoder's GL thread, which would otherwise stall that thread's next frame (i.e.
-     * the RTSP stream itself) for as long as the software JPEG compression takes.
-     */
-    private val snapshotDispatcher = Dispatchers.Default.limitedParallelism(1)
-
-    /**
-     * Reused across every [takeSnapshot] call instead of allocating a fresh
-     * [ByteArrayOutputStream] every 500ms-3s -- pre-sized to a typical JPEG-at-quality-50
-     * size to also avoid the internal buffer's own repeated grow-and-copy. Safe to reuse
-     * because it's only ever touched from [snapshotDispatcher], which serializes access to
-     * one thread at a time -- not because of the old GL-thread callback guarantee, since
-     * compression no longer runs there.
-     */
-    private val snapshotBuffer = ByteArrayOutputStream(64 * 1024)
-
     private fun startTimestampTicker() {
         timestampJob?.cancel()
         timestampJob = serviceScope.launch {
@@ -140,32 +136,6 @@ class CctvServerService : Service(), ConnectChecker {
     private fun stopTimestampTicker() {
         timestampJob?.cancel()
         timestampJob = null
-    }
-
-    /**
-     * Only runs while the camera is streaming -- there is nothing to snapshot otherwise,
-     * so polling on a timer while stopped (previously done for the service's entire
-     * lifetime, since [stopStreamAndRecording] does not stop the service itself) was a
-     * pure waste of wakeups. Started from [publishStreamingStatus], stopped from
-     * [stopStreamAndRecording].
-     */
-    private fun startSnapshotLoop() {
-        snapshotJob?.cancel()
-        snapshotJob = serviceScope.launch {
-            while (isActive) {
-                val viewerActive =
-                    System.currentTimeMillis() - CameraRuntimeBus.lastSnapshotRequestMs < VIEWER_IDLE_TIMEOUT_MS
-
-                if (viewerActive) takeSnapshot()
-
-                delay((if (viewerActive) ACTIVE_SNAPSHOT_INTERVAL_MS else IDLE_SNAPSHOT_INTERVAL_MS).milliseconds)
-            }
-        }
-    }
-
-    private fun stopSnapshotLoop() {
-        snapshotJob?.cancel()
-        snapshotJob = null
     }
 
     override fun onBind(intent: Intent?): IBinder? {
@@ -259,7 +229,7 @@ class CctvServerService : Service(), ConnectChecker {
                 }
                 if (!first && prev.switchCameraRequest != curr.switchCameraRequest) {
                     try {
-                        rtspServerCamera?.switchCamera()
+                        camera2Source?.switchCamera()
                     } catch (e: Exception) {
                         Log.e(TAG, "switchCamera failed", e)
                     }
@@ -277,7 +247,7 @@ class CctvServerService : Service(), ConnectChecker {
     }
 
     private fun applyAuthorization() {
-        val camera = rtspServerCamera?.takeIf { it.isStreaming } ?: return
+        val camera = rtspStream?.takeIf { it.isStreaming } ?: return
         if (settings.authEnabled && settings.authUsername.isNotEmpty() && settings.authPassword.isNotEmpty()) {
             camera.getStreamClient().setAuthorization(settings.authUsername, settings.authPassword)
         } else {
@@ -288,65 +258,40 @@ class CctvServerService : Service(), ConnectChecker {
     /**
      * Stops the RTSP stream and, if a gallery segment is in flight, the recording too --
      * recording must never survive a `prepareVideo()` call, which `startStream()` may make
-     * next. Replaces the bare `rtspServerCamera.stopStream()` call so every stop site tears
+     * next. Replaces the bare `rtspStream.stopStream()` call so every stop site tears
      * down recording the same way instead of each needing its own reminder to do so.
      */
     private suspend fun stopStreamAndRecording() {
         recordingManager.stop()
-        rtspServerCamera?.stopStream()
+        // Must run before stopStream() -- see WebRtcVideoBridge.detachBeforeStop's kdoc for
+        // why the next startStream()'s prepareVideo() would otherwise throw.
+        rtspStream?.let { stream -> webRtcBridge?.detachBeforeStop(stream) }
+        rtspStream?.stopStream()
         // The ticker (and the filter it updates) is tied to this stream's camera/GL
         // session -- without this it keeps calling setText on a filter belonging to a
         // now-torn-down session every second until the stream restarts.
         // applyTimestampOverlay() recreates both from scratch on the next start.
         stopTimestampTicker()
-        stopSnapshotLoop()
         textFilter = null
         ServiceStateRepository.updateRuntime { it.copy(isStreaming = false) }
     }
 
-    /** Publishes live status right after a successful `startStream()`. */
-    private fun publishStreamingStatus(camera: RtspServerCamera2, activeCodec: String) {
-        val range = camera.zoomRange
+    /**
+     * Publishes live status right after a successful `startStream()`.
+     *
+     * [source] is the [camera2Source] set moments earlier in the same [startStream] call
+     * (or on a previous one) -- non-null by construction, see [camera2Source]'s kdoc.
+     */
+    private fun publishStreamingStatus(source: Camera2Source, activeCodec: String) {
+        val range = source.getZoomRange()
         ServiceStateRepository.updateSettings(this) { it.copy(activeCodec = activeCodec) }
         ServiceStateRepository.updateRuntime { it.copy(isStreaming = true, zoomRange = range.lower to range.upper) }
-        startSnapshotLoop()
-    }
-
-    private fun takeSnapshot() {
-        if (!isCameraStreaming) return
-        try {
-            rtspServerCamera?.glInterface?.takePhoto(::onSnapshotBitmap)
-        } catch (e: Exception) {
-            Log.e(TAG, "takeSnapshot failed", e)
-        }
-    }
-
-    /**
-     * `takePhoto()` itself only stores this as a callback and returns immediately -- this
-     * runs later, asynchronously, on RootEncoder's single-thread GL executor whenever it
-     * next renders a frame, so it must return fast: the actual JPEG compression is software
-     * and slow enough to stall that thread's next frame (i.e. the RTSP stream itself), so it
-     * only hands the bitmap off to [snapshotDispatcher] here rather than compressing inline.
-     * Needs its own try/catch separate from [takeSnapshot]'s (which only covers registering
-     * the callback): that one can't see anything thrown from here.
-     */
-    private fun onSnapshotBitmap(bitmap: Bitmap) {
-        serviceScope.launch(snapshotDispatcher) {
-            try {
-                snapshotBuffer.reset()
-                bitmap.compress(Bitmap.CompressFormat.JPEG, 50, snapshotBuffer)
-                CameraRuntimeBus.currentSnapshot.set(snapshotBuffer.toByteArray())
-                bitmap.recycle()
-            } catch (e: Exception) {
-                Log.e(TAG, "takeSnapshot callback failed", e)
-            }
-        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         applyForegroundServiceType()
 
-        // startStream() does its own lazy-init of rtspServerCamera; no need to duplicate
+        // startStream() does its own lazy-init of rtspStream; no need to duplicate
         // that check here. It also applies flashlight/vertical-flip/zoom itself once the
         // stream is actually up -- nightModeEnabled needs no equivalent call here since
         // updateNightModeSensor() only touches the sensor, already registered by
@@ -358,16 +303,19 @@ class CctvServerService : Service(), ConnectChecker {
 
     private fun startStream() {
         try {
-            // recordingManager.attachTo() must run before this camera's first prepareAudio()/
-            // startStream() -- see its kdoc for why installing the record controller any later
-            // loses the race against RootEncoder's shared audio encoder's one-time format
-            // callback.
-            val camera = rtspServerCamera ?: RtspServerCamera2(this, this, 8554).also {
-                rtspServerCamera = it
-                recordingManager.attachTo(it)
+            val stream = rtspStream ?: run {
+                val newCamera2Source = Camera2Source(this)
+                val hasAudioPermission = ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) ==
+                    PackageManager.PERMISSION_GRANTED
+                val audioSource = if (hasAudioPermission) MicrophoneSource() else NoAudioSource()
+                RtspServerStream(this, 8554, this, newCamera2Source, audioSource).also {
+                    rtspStream = it
+                    camera2Source = newCamera2Source
+                    recordingManager.attachTo(it)
+                }
             }
 
-            if (!camera.isStreaming) {
+            if (!stream.isStreaming) {
                 val maxRes = getMaxCameraResolution()
                 if (settings.videoWidth <= 0 || settings.videoHeight <= 0 ||
                     settings.videoWidth.toLong() * settings.videoHeight > maxRes.first.toLong() * maxRes.second
@@ -381,15 +329,7 @@ class CctvServerService : Service(), ConnectChecker {
 
                 val bitrate = settings.bitrateKbps * 1024
 
-                // Audio is always on; only an actual missing RECORD_AUDIO grant falls back
-                // to a camera-only stream.
-                if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) ==
-                    PackageManager.PERMISSION_GRANTED
-                ) {
-                    camera.prepareAudio(64 * 1024, 44100, true, false, false)
-                } else {
-                    camera.disableAudio()
-                }
+                stream.prepareAudio(sampleRate = 44100, isStereo = true, bitrate = 64 * 1024)
 
                 // Check and set Codec
                 val selectedCodec = when (settings.videoCodec) {
@@ -399,38 +339,47 @@ class CctvServerService : Service(), ConnectChecker {
                     else -> VideoCodec.H264
                 }
 
-                camera.setVideoCodec(selectedCodec)
+                stream.setVideoCodec(selectedCodec)
                 Log.d(TAG, "Selected codec: $selectedCodec (${settings.videoCodec})")
 
                 val codecType = CodecUtil.CodecType.FIRST_COMPATIBLE_FOUND
-                camera.forceCodecType(codecType, codecType)
+                stream.forceCodecType(codecType, codecType)
                 Log.d(TAG, "Codec type: $codecType")
 
                 // Set authentication
                 if (settings.authEnabled && settings.authUsername.isNotEmpty() && settings.authPassword.isNotEmpty()) {
-                    camera.getStreamClient().setAuthorization(settings.authUsername, settings.authPassword)
+                    stream.getStreamClient().setAuthorization(settings.authUsername, settings.authPassword)
                     Log.d(TAG, "RTSP auth enabled for user: ${settings.authUsername}")
                 } else {
-                    camera.getStreamClient().setAuthorization("", "")
+                    stream.getStreamClient().setAuthorization("", "")
                     Log.d(TAG, "RTSP auth disabled")
                 }
 
-                val activeCodec = if (camera.prepareVideo(settings.videoWidth, settings.videoHeight, 30, bitrate, 0)) {
+                val activeCodec = if (stream.prepareVideo(
+                        width = settings.videoWidth, height = settings.videoHeight, bitrate = bitrate, fps = 30, rotation = 0
+                    )
+                ) {
                     settings.videoCodec
                 } else {
                     Log.w(TAG, "Codec $selectedCodec preparation failed, falling back to H264")
-                    camera.setVideoCodec(VideoCodec.H264)
-                    if (camera.prepareVideo(settings.videoWidth, settings.videoHeight, 30, bitrate, 0)) "H264" else null
+                    stream.setVideoCodec(VideoCodec.H264)
+                    if (stream.prepareVideo(
+                            width = settings.videoWidth, height = settings.videoHeight, bitrate = bitrate, fps = 30, rotation = 0
+                        )
+                    ) "H264" else null
                 }
 
                 if (activeCodec != null) {
-                    camera.startStream()
+                    stream.startStream()
                     applyTimestampOverlay()
                     applyVerticalFlip()
                     applyFlashlight()
                     applyZoom()
-                    publishStreamingStatus(camera, activeCodec = activeCodec)
+                    // camera2Source is always set alongside rtspStream above (or on a
+                    // previous startStream() call) -- see its kdoc.
+                    publishStreamingStatus(camera2Source!!, activeCodec = activeCodec)
                     recordingManager.startIfNeeded()
+                    ensureWebRtcBridge().attachToStream(stream, settings.videoWidth, settings.videoHeight)
                 } else {
                     Log.e(TAG, "H264 fallback preparation also failed.")
                 }
@@ -449,7 +398,7 @@ class CctvServerService : Service(), ConnectChecker {
 
         try {
             val filter = TextObjectFilterRender()
-            rtspServerCamera?.glInterface?.setFilter(filter)
+            rtspStream?.getGlInterface()?.setFilter(filter)
 
             val fontSize = getOverlayFontSize()
             // No CPU temp yet: this runs on the main thread, so it can't call
@@ -543,14 +492,15 @@ class CctvServerService : Service(), ConnectChecker {
         CameraResolutionUtil.getSupportedResolutions(this).firstOrNull() ?: Pair(1920, 1080)
 
     private fun applyFlashlight() {
-        val camera = rtspServerCamera?.takeIf { it.isStreaming } ?: return
+        if (rtspStream?.isStreaming != true) return
+        val source = camera2Source ?: return
         try {
             if (settings.flashlightEnabled && !isLanternOn) {
-                camera.enableLantern()
+                source.enableLantern()
                 isLanternOn = true
                 Log.d(TAG, "Flashlight ON")
             } else if (!settings.flashlightEnabled && isLanternOn) {
-                camera.disableLantern()
+                source.disableLantern()
                 isLanternOn = false
                 Log.d(TAG, "Flashlight OFF")
             }
@@ -579,18 +529,19 @@ class CctvServerService : Service(), ConnectChecker {
      */
     private fun applyVerticalFlip() {
         try {
-            rtspServerCamera?.glInterface?.setRotation(if (settings.verticalFlipEnabled) 90 else 270)
+            rtspStream?.getGlInterface()?.setRotation(if (settings.verticalFlipEnabled) 90 else 270)
         } catch (e: Exception) {
             Log.e(TAG, "Failed to set vertical flip", e)
         }
     }
 
     private fun applyZoom() {
-        val camera = rtspServerCamera?.takeIf { it.isStreaming } ?: return
+        if (rtspStream?.isStreaming != true) return
+        val source = camera2Source ?: return
         try {
-            val range = camera.zoomRange
+            val range = source.getZoomRange()
             val clamped = settings.zoomLevel.coerceIn(range.lower, range.upper)
-            camera.zoom = clamped
+            source.setZoom(clamped)
             Log.d(TAG, "Zoom set to $clamped (requested ${settings.zoomLevel}, range=$range)")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to set zoom", e)
@@ -598,7 +549,7 @@ class CctvServerService : Service(), ConnectChecker {
     }
 
     private fun applyBitrate() {
-        val camera = rtspServerCamera?.takeIf { it.isStreaming } ?: return
+        val camera = rtspStream?.takeIf { it.isStreaming } ?: return
         try {
             camera.setVideoBitrateOnFly(settings.bitrateKbps * 1024)
             Log.d(TAG, "Bitrate set to ${settings.bitrateKbps}kbps")
@@ -630,11 +581,15 @@ class CctvServerService : Service(), ConnectChecker {
 
         try {
             if (isCameraStreaming) {
-                rtspServerCamera?.stopStream()
+                rtspStream?.let { stream -> webRtcBridge?.detachBeforeStop(stream) }
+                rtspStream?.stopStream()
             }
         } catch (e: Exception) {
             Log.e(TAG, "stopStream on destroy failed", e)
         }
+        webRtcBridge?.release()
+        webRtcBridge = null
+        WebRtcBus.bridge.set(null)
         ServiceStateRepository.updateRuntime { it.copy(isStreaming = false) }
 
         // STOP_FOREGROUND_REMOVE needs API 24; the boolean overload covers API 23 too.
