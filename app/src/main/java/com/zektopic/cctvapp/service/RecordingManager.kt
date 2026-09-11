@@ -131,10 +131,21 @@ class RecordingManager(
                 ?: emptyList()
 
             val statFs = StatFs(dir.path)
+            var deletedCount = 0
             for (file in files) {
-                if (DeviceStatsUtil.usedPercent(statFs) <= recordStorageThresholdPercent) break
-                file.delete()
+                val usedPercent = DeviceStatsUtil.usedPercent(statFs)
+                if (usedPercent <= recordStorageThresholdPercent) break
+                val deleted = file.delete()
+                Log.d(
+                    TAG,
+                    "Retention: usedPercent=$usedPercent > threshold=$recordStorageThresholdPercent, " +
+                        "deleted=$deleted file=${file.name}"
+                )
+                if (deleted) deletedCount++
                 statFs.restat(dir.path)
+            }
+            if (deletedCount > 0) {
+                Log.d(TAG, "Retention: removed $deletedCount old segment(s) to stay under $recordStorageThresholdPercent% storage")
             }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to enforce recording retention", e)
