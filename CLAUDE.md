@@ -140,3 +140,24 @@ possible.
   reflectively, and R8 needs a full on-device verification pass first.
 - `rootEncoder` and `rtspServer` versions in `libs.versions.toml` must be bumped together
   — `RTSP-Server` pins a `RootEncoder` version transitively.
+- `agp` in `libs.versions.toml` is pinned to `8.13.2` to match the AGP version RootEncoder/
+  RTSP-Server declare in their own `gradle/libs.versions.toml` (see `third_party/`
+  submodules below). Gradle refuses to run a single build — composite builds included —
+  with two different AGP versions, so this can only move if the submodules' pin moves (or
+  is patched) too. The explicit `org.jetbrains.kotlin.android` plugin in `build.gradle.kts`/
+  `app/build.gradle.kts` exists only because of this: AGP versions newer than this compile
+  `.kt` sources without a separate Kotlin plugin at all, but on 8.13.2 without it Kotlin
+  sources are silently skipped rather than producing an error.
+
+### Building RootEncoder/RTSP-Server from source
+
+`third_party/RootEncoder` and `third_party/RTSP-Server` are git submodules — not checked
+out by default, run `git submodule update --init` to pull them — pinned to the same tags
+as the `rootEncoder`/`rtspServer` versions in `libs.versions.toml`. By default the build
+still uses the prebuilt Jitpack AARs and these submodules do nothing.
+
+Set `useSourceDeps=true` in your own (git-ignored) `local.properties` to instead build
+both libraries from the submodules' source via a Gradle composite build (`includeBuild` +
+`dependencySubstitution` in `settings.gradle.kts`) — useful for stepping into or patching
+RootEncoder/RTSP-Server locally. `app/build.gradle.kts` is unchanged either way; the
+substitution is transparent to it.

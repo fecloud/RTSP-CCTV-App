@@ -1,0 +1,6 @@
+[submodule "third_party/RootEncoder"]
+	path = third_party/RootEncoder
+	url = https://github.com/pedroSG94/RootEncoder.git
+[submodule "third_party/RTSP-Server"]
+	path = third_party/RTSP-Server
+	url = https://github.com/pedroSG94/RTSP-Server.git

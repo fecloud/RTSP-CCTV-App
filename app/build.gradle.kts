@@ -5,6 +5,7 @@ import java.util.Properties
 
 plugins {
     alias(libs.plugins.android.application)
+    alias(libs.plugins.jetbrains.kotlin)
 }
 
 /**
@@ -138,6 +139,18 @@ android {
         jniLibs {
             useLegacyPackaging = true
         }
+    }
+}
+
+kotlin {
+    // Must match compileOptions above -- the Kotlin plugin defaults its JVM target higher
+    // than that and Gradle refuses to mix targets between the Java and Kotlin compile tasks.
+    // Deliberately NOT jvmToolchain(11): that forces Gradle's toolchain auto-provisioning,
+    // which on this machine picks a JBR-DCEVM install with no `jlink`, breaking javac's
+    // JDK-image transform. Setting the compiler's target directly avoids touching the
+    // toolchain/JDK selection at all.
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_11)
     }
 }
 

@@ -1,5 +1,5 @@
 [versions]
-agp = "9.0.1"
+agp = "8.13.2"
 coreKtx = "1.10.1"
 junit = "4.13.2"
 junitVersion = "1.1.5"
@@ -9,12 +9,19 @@ material = "1.10.0"
 constraintlayout = "2.1.4"
 recyclerview = "1.3.2"
 # rtspServer pins rootEncoder transitively -- bump both together.
-# 1.4.2 / 2.8.0 require compileSdk 37, which AGP 9.0.1 does not support.
+# AGP is pinned to match the version the RootEncoder/RTSP-Server git submodules under
+# third_party/ declare in their own gradle/libs.versions.toml -- Gradle refuses to run a
+# single build (composite builds included) with two different AGP versions, so this repo
+# and the submodules must always move in lockstep. Kotlin is pinned for the same reason:
+# AGP's own built-in Kotlin support (which is all that's needed when the submodules are
+# NOT wired in) only exists on newer AGP; on 8.13.2 Kotlin sources are silently skipped
+# unless this explicit org.jetbrains.kotlin.android plugin is applied.
 rootEncoder = "2.7.2"
 rtspServer = "1.4.1"
 nanohttpd = "2.3.1"
 kotlinxCoroutines = "1.10.2"
 buglyCrashreport = "4.1.9.3"
+kotlin = "2.3.20"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -33,4 +40,5 @@ bugly-crashreport = { group = "com.tencent.bugly", name = "crashreport", version
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
+jetbrains-kotlin = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
 
