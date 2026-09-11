@@ -111,12 +111,21 @@
             display: block;
             transition: opacity 0.2s;
         }
+        .preview-wrapper:fullscreen,
+        .preview-wrapper:-webkit-full-screen {
+            aspect-ratio: auto;
+        }
         .preview-overlay {
             position: absolute;
             top: 12px;
             right: 12px;
             display: flex;
             gap: 6px;
+        }
+        .preview-fullscreen-btn {
+            position: absolute;
+            bottom: 12px;
+            right: 12px;
         }
         .chip {
             padding: 3px 10px;
@@ -133,6 +142,10 @@
                 top: 8px;
                 right: 8px;
                 gap: 4px;
+            }
+            .preview-fullscreen-btn {
+                bottom: 8px;
+                right: 8px;
             }
             .chip {
                 padding: 2px 7px;
@@ -414,6 +427,7 @@
                     <span class="chip" id="chipRes">—</span>
                     <span class="chip" id="btnUnmute" onclick="toggleMute()" style="cursor:pointer;">🔇 Unmute</span>
                 </div>
+                <span class="chip preview-fullscreen-btn" id="btnFullscreen" onclick="toggleFullscreen()" style="cursor:pointer;">⛶</span>
             </div>
             <div class="controls">
                 <button class="btn primary" id="btnStream" onclick="toggleStream()">
@@ -706,6 +720,24 @@
             const video = document.getElementById('cam-preview');
             video.muted = !video.muted;
             document.getElementById('btnUnmute').textContent = video.muted ? '🔇 Unmute' : '🔊 Mute';
+        }
+
+        // Fullscreens the wrapper (not just <video>) so the REC/codec/res chips stay
+        // visible -- except on iOS Safari, which only supports native fullscreen on the
+        // <video> element itself via the non-standard webkitEnterFullscreen().
+        function toggleFullscreen() {
+            const wrapper = document.querySelector('.preview-wrapper');
+            const video = document.getElementById('cam-preview');
+            const fsElement = document.fullscreenElement || document.webkitFullscreenElement;
+            if (!fsElement) {
+                if (wrapper.requestFullscreen) wrapper.requestFullscreen();
+                else if (wrapper.webkitRequestFullscreen) wrapper.webkitRequestFullscreen();
+                else if (video.webkitEnterFullscreen) video.webkitEnterFullscreen();
+            } else if (document.exitFullscreen) {
+                document.exitFullscreen();
+            } else if (document.webkitExitFullscreen) {
+                document.webkitExitFullscreen();
+            }
         }
 
         // --- Resolution options ---
