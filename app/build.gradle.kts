@@ -172,5 +172,6 @@ dependencies {
     implementation(libs.rootencoder.library)
     implementation(libs.rtsp.server)
     implementation(libs.nanohttpd)
+    implementation(libs.nanohttpd.websocket)
     implementation(libs.bugly.crashreport)
 }

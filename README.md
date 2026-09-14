@@ -78,23 +78,27 @@ NVR can consume, and keeps every frame on your own network.
 ```mermaid
 flowchart LR
     CAM[Camera2 + OpenGL surface] --> ENC[Hardware encoder<br/>H.264 / H.265]
-    CAM --> SNAP[JPEG snapshot loop<br/>throttled when idle]
-
     ENC --> RTSP[RTSP server<br/>:8554]
-    SNAP --> WEB[Web server<br/>:8081]
+    ENC --> FMP4[fmp4 fragmenter<br/>one encode, any number of viewers]
+
+    FMP4 --> WS[WebSocket<br/>:8081/ws]
 
     RTSP --> NVR[VLC / OBS / Frigate / NVR]
-    WEB --> BROWSER[Browser dashboard]
+    WS --> BROWSER[Browser dashboard<br/>MediaSource / SourceBuffer]
 ```
 
 Everything runs inside one foreground service. The RTSP stream comes straight off the
-hardware encoder; the dashboard shares a single JPEG capture loop, which idles
-automatically when nobody is watching.
+hardware encoder; the dashboard's live preview muxes that same encoded H.264/AAC output
+into fragmented MP4 (MSE) and pushes it to every connected browser tab over one WebSocket
+each, sharing one camera/mic capture rather than opening it once per viewer.
 
 | Component | File |
 |---|---|
 | Foreground service, camera, stream lifecycle | `CctvServerService.kt` |
-| HTTP server and dashboard | `WebServer.kt` |
+| HTTP server, dashboard and WebSocket route | `WebServer.kt` |
+| Camera pipeline shared by RTSP/recording/MSE | `SharedCameraStream.kt` |
+| fmp4 muxing for the MSE preview | `Fmp4Fragmenter.kt` |
+| Per-viewer MSE broadcast and WebSocket handling | `MseVideoBridge.kt`, `MseStreamSocket.kt` |
 | Authentication, CSRF and HTML escaping | `WebAuth.kt` |
 | Settings | `AppPreferences.kt` |
 
@@ -199,7 +203,6 @@ cross-origin `Origin` header are rejected with `403`.
 | Endpoint | Returns |
 |---|---|
 | `GET /` | The dashboard |
-| `GET /shot.jpg` | Current JPEG snapshot |
 | `GET /status` | JSON status: streaming state, codec, resolution, every setting, battery, Wi-Fi |
 | `GET /recordings` | HTML page listing saved recordings, newest first |
 | `GET /recording.mp4?id=<id>[&download=1]` | Streams a recording inline, or forces download with `download=1` |
@@ -215,6 +218,39 @@ cross-origin `Origin` header are rejected with `403`.
 | `POST /action/set-setting` | `key=<key>&value=<value>` |
 | `POST /action/set-auth` | `enabled=<bool>&username=<s>&password=<s>` |
 
+### Live preview (MSE)
+
+The dashboard's live preview is MSE (Media Source Extensions), not a plain HTTP endpoint:
+`WS /ws` streams fragmented MP4 (subject to the same Origin/Basic-Auth checks as every
+route above, checked once against the WebSocket upgrade request's headers). One browser
+tab opens one `/ws` connection and appends what it receives into a `MediaSource`
+`SourceBuffer`, but every connection is fed from the same fmp4 fragmenter -- any number of
+tabs can watch at once without a second hardware encode. There's no SDP/ICE negotiation:
+the socket is send-only from the phone's side, so it only works between devices that can
+reach each other directly (this app is LAN-only by design, see "Security" above).
+
+The wire format is one text frame, then binary frames:
+
+```jsonc
+// Phone -> browser, once on connect -- the exact string for MediaSource.addSourceBuffer()
+{"codecs": "video/mp4; codecs=\"avc1.640028,mp4a.40.2\""}
+```
+```
+// Phone -> browser, binary WebSocket frames, in order:
+//   1. the fmp4 init segment (ftyp+moov)
+//   2. the most recent video keyframe fragment, if any (so playback doesn't wait out the
+//      next IDR interval)
+//   3. one moof+mdat fragment per subsequent video NAL / audio access unit
+```
+
+A codec or resolution change closes every connected `/ws` viewer (their `SourceBuffer` was
+built against the old init segment and can't be hot-swapped) -- the dashboard reconnects
+automatically and rebuilds it against the new one.
+
+If the camera isn't currently streaming, the server closes the socket immediately
+(`GoingAway`) rather than accepting an offer it has nothing to answer with -- see
+`app/src/main/assets/web/dashboard.html`'s client script, which just reconnects on a timer.
+
 <details>
 <summary><b>Keys accepted by <code>/action/set-setting</code></b></summary>
 
@@ -225,7 +261,7 @@ cross-origin `Origin` header are rejected with `403`.
 | `timestamp_size` | `Small` \| `Medium` \| `Large` | Overlay text size |
 | `flashlight_enabled` | bool | Torch |
 | `night_mode_enabled` | bool | Automatic torch by ambient light |
-| `vertical_flip_enabled` | bool | Flip stream/snapshot for an upside-down mount |
+| `vertical_flip_enabled` | bool | Flip stream/preview for an upside-down mount |
 | `zoom_level` | float 1.0–8.0 | Camera digital zoom factor |
 | `bitrate_kbps` | int 500–8000 | Video bitrate, applied live while streaming |
 | `web_auth_enabled` | bool | Require authentication on port 8081 |

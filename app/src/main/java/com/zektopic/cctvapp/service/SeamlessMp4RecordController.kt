@@ -20,7 +20,7 @@ import kotlinx.coroutines.launch
  * built-in one (`AndroidMuxerRecordController`), which only supports one file per
  * `startRecord()`/`stopRecord()` call pair. RootEncoder forwards every encoded frame to
  * whatever `RecordController` is installed regardless of recording state, so installing this
- * one via `RtspServerCamera2.setRecordController(...)` and calling `startRecord()`/
+ * one via `RtspServerStream.setRecordController(...)` and calling `startRecord()`/
  * `stopRecord()` exactly once per recording session (never per segment -- see
  * [RecordingManager]) lets the encoder run uninterrupted across segment boundaries: there is
  * no window where neither the old nor the new file is receiving frames, unlike a design that

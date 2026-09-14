@@ -103,12 +103,17 @@
             align-items: center;
             justify-content: center;
         }
-        .preview-wrapper img {
+        .preview-wrapper img,
+        .preview-wrapper video {
             width: 100%;
             height: 100%;
             object-fit: contain;
             display: block;
             transition: opacity 0.2s;
+        }
+        .preview-wrapper:fullscreen,
+        .preview-wrapper:-webkit-full-screen {
+            aspect-ratio: auto;
         }
         .preview-overlay {
             position: absolute;
@@ -116,6 +121,11 @@
             right: 12px;
             display: flex;
             gap: 6px;
+        }
+        .preview-fullscreen-btn {
+            position: absolute;
+            bottom: 12px;
+            right: 12px;
         }
         .chip {
             padding: 3px 10px;
@@ -132,6 +142,10 @@
                 top: 8px;
                 right: 8px;
                 gap: 4px;
+            }
+            .preview-fullscreen-btn {
+                bottom: 8px;
+                right: 8px;
             }
             .chip {
                 padding: 2px 7px;
@@ -406,12 +420,14 @@
         <!-- Preview -->
         <div class="preview-card">
             <div class="preview-wrapper">
-                <img id="cam-preview" src="/shot.jpg" alt="Live Preview" />
+                <video id="cam-preview" autoplay playsinline muted></video>
                 <div class="preview-overlay">
                     <span class="chip" id="chipRec" style="display:none;color:var(--danger);">● REC</span>
                     <span class="chip" id="chipCodec">—</span>
                     <span class="chip" id="chipRes">—</span>
+                    <span class="chip" id="btnUnmute" onclick="toggleMute()" style="cursor:pointer;">🔇 Unmute</span>
                 </div>
+                <span class="chip preview-fullscreen-btn" id="btnFullscreen" onclick="toggleFullscreen()" style="cursor:pointer;">⛶</span>
             </div>
             <div class="controls">
                 <button class="btn primary" id="btnStream" onclick="toggleStream()">
@@ -637,14 +653,97 @@
                 .then(() => { showToast('Bitrate: ' + v + ' kbps'); fetchStatus(); });
         }
 
-        // --- Preview auto-refresh ---
-        const img = document.getElementById('cam-preview');
-        setInterval(() => {
-            const newImg = new Image();
-            newImg.onload = () => { img.src = newImg.src; };
-            newImg.src = '/shot.jpg?t=' + Date.now();
-        }, 500);
-        
+        // --- MSE live preview ---
+        // Wire format over /ws (see MseStreamSocket.kt): one text control message
+        // ({"codecs": "video/mp4; codecs=\"...\""}, the exact string addSourceBuffer()
+        // expects), then binary fmp4 fragments (an init segment, then one moof+mdat per
+        // video/audio sample) appended straight into a MediaSource SourceBuffer. No
+        // SDP/ICE negotiation needed -- this socket is send-only from the server's side.
+        let mseWs = null;
+        let mseObjectUrl = null;
+
+        function startMsePreview() {
+            const video = document.getElementById('cam-preview');
+            const mediaSource = new MediaSource();
+            // Revoke the previous session's blob URL -- every reconnect (see mseWs.onclose
+            // below) creates a brand new MediaSource, and without this each one leaks.
+            if (mseObjectUrl) URL.revokeObjectURL(mseObjectUrl);
+            mseObjectUrl = URL.createObjectURL(mediaSource);
+            video.src = mseObjectUrl;
+
+            let sourceBuffer = null;
+            const pendingChunks = [];
+            const pump = () => {
+                if (!sourceBuffer || sourceBuffer.updating || pendingChunks.length === 0) return;
+                try {
+                    sourceBuffer.appendBuffer(pendingChunks.shift());
+                } catch (e) {
+                    console.error('appendBuffer failed', e);
+                }
+            };
+
+            mediaSource.addEventListener('sourceopen', () => {
+                const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+                mseWs = new WebSocket(wsProtocol + '//' + location.host + '/ws');
+                mseWs.binaryType = 'arraybuffer';
+
+                mseWs.onmessage = (event) => {
+                    if (typeof event.data === 'string') {
+                        // The one-time codecs message -- must arrive before any binary
+                        // fragment, since the SourceBuffer has to exist before appending.
+                        const msg = JSON.parse(event.data);
+                        sourceBuffer = mediaSource.addSourceBuffer(msg.codecs);
+                        // 'sequence' mode: a new viewer's first appended sample becomes local
+                        // position 0, regardless of how many seconds the server's own fmp4
+                        // clock has accumulated since the stream started -- 'segments' mode
+                        // (which trusts each fragment's absolute tfdt) leaves the video element
+                        // waiting forever for buffered data at position 0 that will never
+                        // arrive. Fmp4Fragmenter.resetSession keeps both tracks' tfdt mutually
+                        // consistent per session, which is what makes 'sequence' mode's single
+                        // shared offset safe for two independently-timed tracks here.
+                        sourceBuffer.mode = 'sequence';
+                        sourceBuffer.addEventListener('updateend', pump);
+                        return;
+                    }
+                    pendingChunks.push(new Uint8Array(event.data));
+                    pump();
+                };
+                // Reconnects on close for any reason -- including the phone not streaming
+                // yet (the server closes with GoingAway in that case) or a codec/resolution
+                // restart (the server force-closes every viewer so each rebuilds its
+                // SourceBuffer against the new init segment) -- on a fixed delay rather than
+                // exponential backoff, since this is one device on a LAN, not a public
+                // service worth being gentle with.
+                mseWs.onclose = () => setTimeout(startMsePreview, 2000);
+                mseWs.onerror = () => { mseWs.close(); };
+            }, { once: true });
+        }
+        startMsePreview();
+
+        function toggleMute() {
+            const video = document.getElementById('cam-preview');
+            video.muted = !video.muted;
+            document.getElementById('btnUnmute').textContent = video.muted ? '🔇 Unmute' : '🔊 Mute';
+        }
+
+        // Fullscreens the wrapper (not just <video>) so the REC/codec/res chips stay
+        // visible -- except on iOS Safari, which only supports native fullscreen on the
+        // <video> element itself via the non-standard webkitEnterFullscreen().
+        function toggleFullscreen() {
+            const wrapper = document.querySelector('.preview-wrapper');
+            const video = document.getElementById('cam-preview');
+            const fsElement = document.fullscreenElement || document.webkitFullscreenElement;
+            if (!fsElement) {
+                if (wrapper.requestFullscreen) wrapper.requestFullscreen();
+                else if (wrapper.webkitRequestFullscreen) wrapper.webkitRequestFullscreen();
+                else if (video.webkitEnterFullscreen) video.webkitEnterFullscreen();
+            } else if (document.exitFullscreen) {
+                document.exitFullscreen();
+            } else if (document.webkitExitFullscreen) {
+                document.webkitExitFullscreen();
+            }
+        }
+
         // --- Resolution options ---
         // Populated once from the camera's real supported sizes (falls back to a
         // small static list if the device somehow reports none), then left alone --

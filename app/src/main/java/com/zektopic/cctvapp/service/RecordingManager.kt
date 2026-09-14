@@ -4,9 +4,9 @@ import android.content.Context
 import android.os.StatFs
 import com.zektopic.cctvapp.log.AppLog as Log
 import com.pedro.library.base.recording.RecordController
-import com.pedro.rtspserver.RtspServerCamera2
 import com.zektopic.cctvapp.device.DeviceStatsUtil
 import com.zektopic.cctvapp.settings.ServiceStateRepository
+import com.zektopic.cctvapp.streaming.SharedCameraStream
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -20,7 +20,7 @@ import kotlinx.coroutines.withContext
 
 class RecordingManager(
     private val context: Context,
-    private val camera: () -> RtspServerCamera2?
+    private val camera: () -> SharedCameraStream?
 ) {
     companion object {
         private const val TAG = "RecordingManager"
@@ -57,13 +57,13 @@ class RecordingManager(
      * consistently too late and left every recording's audio track empty despite RTSP
      * streaming, which bypasses `RecordController` entirely, having audio the whole time).
      * A no-op after the first call, so it's safe for [CctvServerService] to call this
-     * unconditionally right after constructing its `RtspServerCamera2`.
+     * unconditionally right after constructing its `SharedCameraStream`.
      */
-    fun attachTo(cam: RtspServerCamera2) {
+    fun attachTo(cam: SharedCameraStream) {
         controller?.let { return }
         if (cam.isStreaming) {
             // The one call site this ordering actually depends on (CctvServerService
-            // constructing RtspServerCamera2) always calls this first -- if that's ever no
+            // constructing SharedCameraStream) always calls this first -- if that's ever no
             // longer true, this is the only signal a future caller gets, since the race it
             // misses (RootEncoder's one-time setAudioFormat callback) fails silently otherwise.
             Log.w(TAG, "attachTo() called after the camera was already streaming; a recording started before this may be missing its audio track")
@@ -93,7 +93,7 @@ class RecordingManager(
                 return@launch
             }
             try {
-                cam.startRecord(firstFile.absolutePath, recordListener)
+                cam.startRecord(firstFile.absolutePath, listener = recordListener)
             } catch (e: Exception) {
                 Log.e(TAG, "startRecord failed", e)
                 return@launch
