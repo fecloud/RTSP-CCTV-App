@@ -621,7 +621,8 @@
     </div>
     
     <div class="toast" id="toast"></div>
-    
+
+    <script src="/h264-converter.js"></script>
     <script>
         // --- Zoom slider ---
         const zoomSlider = document.getElementById('zoomSlider');
@@ -657,116 +658,171 @@
 
         // --- MSE live preview ---
         // Wire format over /ws (see MseStreamSocket.kt): one text control message with the
-        // codecs string, then binary fmp4 fragments appended into a MediaSource SourceBuffer.
-        // <video> is muted so autoplay is never blocked; users can unmute via native controls.
-        // SourceBuffer.mode is 'segments' -- a new viewer seeks to `buffered.start(0)` (the
-        // intersection of both tracks' ranges) rather than trusting position 0.
+        // stream's fps, then binary messages each carrying one raw Annex-B H.264 NAL (start code
+        // included) straight off the encoder -- no server-side muxing. `h264-converter.js`
+        // (vendored, same library ws-scrcpy's web client uses) builds the fmp4 fragments and
+        // manages its own MediaSource/SourceBuffer; this file just feeds it bytes and layers on
+        // the parts it doesn't do itself: buffer trimming (it never evicts old ranges), live-edge
+        // catch-up, and recovery from a stuck decoder. <video> is muted so autoplay is never
+        // blocked -- there's no audio track to unmute anyway, this is video-only like ws-scrcpy.
         const MSE_PREVIEW = {
-            BUFFER_RETENTION_SECONDS: 30,
-            // Catch-up: nudge playbackRate when behind live, like hls.js/dash.js.
-            CATCHUP_TRIGGER_SECONDS: 0.6,
-            CATCHUP_RESET_SECONDS: 0.2,
+            // h264-converter.js appends once per NAL (dozens of tiny appendBuffer calls/sec),
+            // very different from a typical player's multi-second segments -- confirmed
+            // on-device that trimming only every 10s let the buffer balloon past 30s+ before
+            // pruning, and appendBuffer started silently failing (quota) partway through,
+            // leaving gaps in `buffered`. Trim often and keep less of it.
+            BUFFER_RETENTION_SECONDS: 15,
+            TRIM_INTERVAL_MS: 1000,
+            // Catch-up: nudge playbackRate when behind live, like hls.js/dash.js. Confirmed
+            // on-device that steady-state playback settles ~0.45-0.5s behind live -- with too
+            // high a trigger that's under threshold forever, so catch-up never engages and the
+            // lag just sits there instead of getting pulled back down.
+            CATCHUP_TRIGGER_SECONDS: 0.35,
+            CATCHUP_RESET_SECONDS: 0.15,
             CATCHUP_PLAYBACK_RATE: 1.25,
-            PERIODIC_CHECK_INTERVAL_MS: 10000,
             RECONNECT_DELAY_MS: 2000,
             // Forces a reconnect if no bytes arrive for this long (the WS can go silently dead).
             WATCHDOG_INTERVAL_MS: 3000,
             STALL_TIMEOUT_MS: 8000,
-            // currentTime can stop advancing even while data keeps appending fine (a decode
-            // stall, not a buffering wait) -- seek to the live edge once stuck this long.
+            // How long the decoder has to sit on the same frame count before it's considered
+            // stuck (see recoverIfFrozen) and worth seeking past.
             PLAYBACK_FROZEN_RECOVER_MS: 1500,
             // If seeking in place doesn't unstick a frozen decode after this many tries, force a
             // full reconnect instead of continuing to fight a possibly-wedged MediaSource.
             MAX_FROZEN_RECOVERIES_BEFORE_RECONNECT: 2,
+            HEARTBEAT_LOG_INTERVAL_MS: 2000,
+            // Checked on its own timer rather than on every appended NAL -- NALs arrive faster
+            // than video frames actually decode, so checking on every one flagged "no new frame
+            // since the last check" during perfectly healthy playback too. This interval just
+            // needs to clear one real frame at typical fps.
+            FROZEN_CHECK_INTERVAL_MS: 400,
         };
 
-        let mseObjectUrl = null;
+        // h264-converter.js otherwise swallows its own internal errors (e.g. appendBuffer
+        // throwing QuotaExceededError) silently -- surface just those, not its very verbose
+        // per-fragment debug logging (which would fire dozens of times a second and drown out
+        // everything else). Global to the module, not per-connection, so only needs setting once.
+        if (typeof H264ConverterSetLogger === 'function') {
+            H264ConverterSetLogger(() => {}, (msg) => console.error('[h264-converter]', msg));
+        }
 
         function startMsePreview() {
             const video = document.getElementById('cam-preview');
-            const mediaSource = new MediaSource();
-            if (mseObjectUrl) URL.revokeObjectURL(mseObjectUrl); // previous session's blob URL would otherwise leak
-            mseObjectUrl = URL.createObjectURL(mediaSource);
-            video.src = mseObjectUrl;
             video.playbackRate = 1.0; // don't inherit a sped-up rate from a previous session
 
-            let sourceBuffer = null;
-            let periodicTimer = null;
+            let converter = null;
+            let trimTimer = null;
             let watchdogTimer = null;
-            let seekedToLiveEdge = false;
+            let heartbeatTimer = null;
+            let frozenCheckTimer = null;
             let lastDataAt = Date.now();
-            let lastPlaybackTime = -1;
+            let lastDecodedFrames = -1;
             let frozenSince = -1;
             let consecutiveFrozenRecoveries = 0;
             let ws = null;
-            const pendingChunks = [];
+            let messageCount = 0;
+            let lastHeartbeatMessageCount = 0;
 
-            function appendNextChunk() {
-                if (!sourceBuffer || sourceBuffer.updating || pendingChunks.length === 0) return;
-                const chunk = pendingChunks.shift();
-                try {
-                    sourceBuffer.appendBuffer(chunk);
-                } catch (e) {
-                    // Likely QuotaExceededError -- make room and retry instead of dropping the chunk.
-                    console.error('appendBuffer failed, trimming and retrying', e);
-                    pendingChunks.unshift(chunk);
-                    trimBuffer(/* aggressive= */ true);
-                }
+            // Diagnostic-only: snapshots everything relevant to a stuck/frozen preview so a
+            // console log capture is enough to diagnose it without reproducing on-device.
+            function snapshot() {
+                const quality = typeof video.getVideoPlaybackQuality === 'function' ? video.getVideoPlaybackQuality() : null;
+                const sb = converter ? converter.sourceBuffer : null;
+                const buffered = sb ? sb.buffered : null;
+                const ranges = [];
+                if (buffered) for (let i = 0; i < buffered.length; i++) ranges.push('[' + buffered.start(i).toFixed(2) + ',' + buffered.end(i).toFixed(2) + ']');
+                return {
+                    currentTime: video.currentTime.toFixed(2),
+                    paused: video.paused,
+                    readyState: video.readyState,
+                    networkState: video.networkState,
+                    playbackRate: video.playbackRate,
+                    buffered: ranges.join(' ') || 'none',
+                    sbUpdating: sb ? sb.updating : null,
+                    wsState: ws ? ws.readyState : null,
+                    decodedFrames: quality ? quality.totalVideoFrames : null,
+                    droppedFrames: quality ? quality.droppedVideoFrames : null,
+                };
+            }
+            // A single flat string, not console.log(tag, {...}) -- DevTools truncates an inline
+            // object preview with '...' past a handful of properties, which silently drops the
+            // fields (decodedFrames especially) a copy-pasted report needs most.
+            function log(tag, extra) {
+                const s = snapshot();
+                let line = '[MSE] ' + tag + ' t=' + s.currentTime + ' paused=' + s.paused + ' ready=' + s.readyState +
+                    ' net=' + s.networkState + ' rate=' + s.playbackRate + ' buf=' + s.buffered +
+                    ' sbUpd=' + s.sbUpdating + ' ws=' + s.wsState +
+                    ' decFrames=' + s.decodedFrames + ' dropFrames=' + s.droppedFrames;
+                if (extra) line += ' ' + JSON.stringify(extra);
+                console.log(line);
             }
 
-            function trimBuffer(aggressive) {
-                if (!sourceBuffer || sourceBuffer.updating || sourceBuffer.buffered.length === 0) return;
-                const retention = aggressive
-                    ? MSE_PREVIEW.BUFFER_RETENTION_SECONDS / 3
-                    : MSE_PREVIEW.BUFFER_RETENTION_SECONDS;
-                const removeEnd = video.currentTime - retention;
-                if (removeEnd > sourceBuffer.buffered.start(0)) sourceBuffer.remove(0, removeEnd);
-            }
+            function onVideoWaiting() { log('video-waiting'); }
+            function onVideoStalled() { log('video-stalled'); }
+            function onVideoError() { log('video-error', { error: video.error ? video.error.code : null }); }
+            video.addEventListener('waiting', onVideoWaiting);
+            video.addEventListener('stalled', onVideoStalled);
+            video.addEventListener('error', onVideoError);
 
-            function seekToLiveEdgeOnce() {
-                if (seekedToLiveEdge || !sourceBuffer || sourceBuffer.buffered.length === 0) return;
-                seekedToLiveEdge = true;
-                video.currentTime = sourceBuffer.buffered.start(0);
-            }
-
-            // autoplay alone doesn't always resume after the seek above; retry play() until it sticks.
-            function resumeIfPaused() {
-                if (!video.paused || !sourceBuffer || sourceBuffer.buffered.length === 0) return;
-                video.play().catch(() => {});
+            // h264-converter.js never calls SourceBuffer.remove() -- fine for ws-scrcpy's short
+            // remote-control sessions, not for a camera dashboard left open for hours. Reaches
+            // into the converter's own sourceBuffer property (a plain instance field, not
+            // actually private at runtime) rather than patching the vendored library.
+            function trimBuffer() {
+                const sb = converter && converter.sourceBuffer;
+                if (!sb || sb.updating || sb.buffered.length === 0) return;
+                const removeEnd = video.currentTime - MSE_PREVIEW.BUFFER_RETENTION_SECONDS;
+                if (removeEnd > sb.buffered.start(0)) sb.remove(0, removeEnd);
             }
 
             function recoverIfFrozen() {
-                if (!sourceBuffer || sourceBuffer.buffered.length === 0) return;
+                const sb = converter && converter.sourceBuffer;
+                if (!sb || sb.buffered.length === 0) return;
                 const currentTime = video.currentTime;
-                const liveEdge = sourceBuffer.buffered.end(sourceBuffer.buffered.length - 1);
-                const hasDataAhead = liveEdge - currentTime > MSE_PREVIEW.CATCHUP_RESET_SECONDS;
-                if (currentTime !== lastPlaybackTime || !hasDataAhead) {
-                    lastPlaybackTime = currentTime;
+                const liveEdge = sb.buffered.end(sb.buffered.length - 1);
+                // Deliberately NOT CATCHUP_RESET_SECONDS -- that one governs the playbackRate
+                // hysteresis and the buffer's steady-state gap sits right on top of it, so reusing
+                // it here flipped true/false on almost every check (confirmed on-device) and reset
+                // the frozen timer before it ever reached PLAYBACK_FROZEN_RECOVER_MS. This just
+                // means "buffer is basically empty," a much smaller bar.
+                const hasDataAhead = liveEdge - currentTime > 0.05;
+                // currentTime alone can't tell a real decode stall from healthy playback -- it can
+                // keep advancing while the video decoder is stuck on one frame (observed on-device:
+                // buffered kept growing and currentTime kept ticking for several seconds while
+                // decodedFrames sat still -- a Chrome decoder-level stall, unrelated to which
+                // library built the fmp4). Frame count is the real signal.
+                const quality = typeof video.getVideoPlaybackQuality === 'function' ? video.getVideoPlaybackQuality() : null;
+                const decodedFrames = quality ? quality.totalVideoFrames : null;
+                const framesAdvanced = decodedFrames === null || decodedFrames !== lastDecodedFrames;
+                if (decodedFrames !== null) lastDecodedFrames = decodedFrames;
+                if (!hasDataAhead || framesAdvanced) {
                     frozenSince = -1;
                     consecutiveFrozenRecoveries = 0;
                     return;
                 }
                 if (frozenSince === -1) {
                     frozenSince = Date.now();
+                    log('freeze-detected');
                     return;
                 }
                 if (Date.now() - frozenSince < MSE_PREVIEW.PLAYBACK_FROZEN_RECOVER_MS) return;
                 frozenSince = -1;
                 consecutiveFrozenRecoveries++;
                 if (consecutiveFrozenRecoveries > MSE_PREVIEW.MAX_FROZEN_RECOVERIES_BEFORE_RECONNECT) {
-                    console.warn('MSE preview still frozen after seeking in place, forcing full reconnect');
+                    log('freeze-force-reconnect');
                     consecutiveFrozenRecoveries = 0;
                     if (ws) ws.close();
                     return;
                 }
-                console.warn('MSE preview frozen, seeking to live edge');
+                log('freeze-seek-live-edge', { liveEdge: liveEdge.toFixed(2) });
                 video.currentTime = liveEdge;
                 video.play().catch(() => {});
             }
 
             function catchUpToLiveEdge() {
-                if (!sourceBuffer || sourceBuffer.buffered.length === 0) return;
-                const liveEdge = sourceBuffer.buffered.end(sourceBuffer.buffered.length - 1);
+                const sb = converter && converter.sourceBuffer;
+                if (!sb || sb.buffered.length === 0) return;
+                const liveEdge = sb.buffered.end(sb.buffered.length - 1);
                 const delay = liveEdge - video.currentTime;
                 if (delay > MSE_PREVIEW.CATCHUP_TRIGGER_SECONDS) {
                     video.playbackRate = MSE_PREVIEW.CATCHUP_PLAYBACK_RATE;
@@ -775,55 +831,59 @@
                 }
             }
 
-            function onBufferSettled() {
-                appendNextChunk();
-                seekToLiveEdgeOnce();
-                resumeIfPaused();
-                recoverIfFrozen();
-                catchUpToLiveEdge();
-                trimBuffer(false);
-            }
+            const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+            ws = new WebSocket(wsProtocol + '//' + location.host + '/ws');
+            ws.binaryType = 'arraybuffer';
+            ws.onopen = () => log('ws-open');
 
-            mediaSource.addEventListener('sourceopen', () => {
-                const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-                ws = new WebSocket(wsProtocol + '//' + location.host + '/ws');
-                ws.binaryType = 'arraybuffer';
+            lastDataAt = Date.now();
+            watchdogTimer = setInterval(() => {
+                if (Date.now() - lastDataAt > MSE_PREVIEW.STALL_TIMEOUT_MS) {
+                    log('watchdog-stall');
+                    ws.close();
+                }
+            }, MSE_PREVIEW.WATCHDOG_INTERVAL_MS);
 
+            ws.onmessage = (event) => {
                 lastDataAt = Date.now();
-                watchdogTimer = setInterval(() => {
-                    if (Date.now() - lastDataAt > MSE_PREVIEW.STALL_TIMEOUT_MS) {
-                        console.warn('MSE preview stalled, forcing reconnect');
-                        ws.close();
-                    }
-                }, MSE_PREVIEW.WATCHDOG_INTERVAL_MS);
-
-                ws.onmessage = (event) => {
-                    lastDataAt = Date.now();
-                    if (typeof event.data === 'string') {
-                        const msg = JSON.parse(event.data);
-                        sourceBuffer = mediaSource.addSourceBuffer(msg.codecs);
-                        sourceBuffer.mode = 'segments';
-                        sourceBuffer.addEventListener('updateend', onBufferSettled);
-                        periodicTimer = setInterval(() => {
-                            trimBuffer(false);
-                            resumeIfPaused();
-                            recoverIfFrozen();
-                            catchUpToLiveEdge();
-                        }, MSE_PREVIEW.PERIODIC_CHECK_INTERVAL_MS);
-                        return;
-                    }
-                    pendingChunks.push(new Uint8Array(event.data));
-                    appendNextChunk();
-                };
-                // Reconnects on close for any reason: not streaming yet, a codec/resolution
-                // restart, or the watchdog above forcing one.
-                ws.onclose = () => {
-                    clearInterval(periodicTimer);
-                    clearInterval(watchdogTimer);
-                    setTimeout(startMsePreview, MSE_PREVIEW.RECONNECT_DELAY_MS);
-                };
-                ws.onerror = () => ws.close();
-            }, { once: true });
+                messageCount++;
+                if (typeof event.data === 'string') {
+                    const msg = JSON.parse(event.data);
+                    // framesPerFragment=1 (one appendBuffer() call per NAL, ~25/sec) matched the
+                    // periodic decoder stalls observed on-device almost exactly to a repeating
+                    // ~4s cycle -- batching a few frames per fragment cuts append frequency at
+                    // the cost of a little latency; worth trying against that same stall pattern.
+                    converter = new VideoConverter(video, msg.fps, /* framesPerFragment= */ 5);
+                    converter.play();
+                    log('fps', { fps: msg.fps });
+                    // Separate from FROZEN_CHECK_INTERVAL_MS/catchUpToLiveEdge (already called
+                    // per-NAL below) -- this one only needs to run often enough to keep the
+                    // buffer from growing past BUFFER_RETENTION_SECONDS between checks.
+                    trimTimer = setInterval(trimBuffer, MSE_PREVIEW.TRIM_INTERVAL_MS);
+                    frozenCheckTimer = setInterval(recoverIfFrozen, MSE_PREVIEW.FROZEN_CHECK_INTERVAL_MS);
+                    heartbeatTimer = setInterval(() => {
+                        log('heartbeat', { msgsPerInterval: messageCount - lastHeartbeatMessageCount });
+                        lastHeartbeatMessageCount = messageCount;
+                    }, MSE_PREVIEW.HEARTBEAT_LOG_INTERVAL_MS);
+                    return;
+                }
+                converter.appendRawData(new Uint8Array(event.data));
+                catchUpToLiveEdge();
+            };
+            // Reconnects on close for any reason: not streaming yet, a codec/resolution/fps
+            // restart, or the watchdog above forcing one.
+            ws.onclose = (event) => {
+                log('ws-close', { code: event.code, reason: event.reason, wasClean: event.wasClean });
+                video.removeEventListener('waiting', onVideoWaiting);
+                video.removeEventListener('stalled', onVideoStalled);
+                video.removeEventListener('error', onVideoError);
+                clearInterval(trimTimer);
+                clearInterval(watchdogTimer);
+                clearInterval(heartbeatTimer);
+                clearInterval(frozenCheckTimer);
+                setTimeout(startMsePreview, MSE_PREVIEW.RECONNECT_DELAY_MS);
+            };
+            ws.onerror = () => { log('ws-error'); ws.close(); };
         }
         startMsePreview();
 

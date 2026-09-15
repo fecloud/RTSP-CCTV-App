@@ -80,26 +80,27 @@ NVR can consume, and keeps every frame on your own network.
 flowchart LR
     CAM[Camera2 + OpenGL surface] --> ENC[Hardware encoder<br/>H.264 / H.265]
     ENC --> RTSP[RTSP server<br/>:8554]
-    ENC --> FMP4[fmp4 fragmenter<br/>one encode, any number of viewers]
+    ENC --> RELAY[Raw H.264 NAL relay<br/>one encode, any number of viewers]
 
-    FMP4 --> WS[WebSocket<br/>:8081/ws]
+    RELAY --> WS[WebSocket<br/>:8081/ws]
 
     RTSP --> NVR[VLC / OBS / Frigate / NVR]
-    WS --> BROWSER[Browser dashboard<br/>MediaSource / SourceBuffer]
+    WS --> BROWSER[Browser dashboard<br/>h264-converter.js builds fmp4,<br/>MediaSource / SourceBuffer]
 ```
 
 Everything runs inside one foreground service. The RTSP stream comes straight off the
-hardware encoder; the dashboard's live preview muxes that same encoded H.264/AAC output
-into fragmented MP4 (MSE) and pushes it to every connected browser tab over one WebSocket
-each, sharing one camera/mic capture rather than opening it once per viewer.
+hardware encoder; the dashboard's live preview forwards that same encoder's raw H.264 NALs
+(no server-side muxing) to every connected browser tab over one WebSocket each, sharing one
+camera capture rather than opening it once per viewer. Each tab's own `h264-converter.js`
+(vendored, MSE, video-only -- the same library ws-scrcpy's web client uses) builds the
+fragmented MP4 client-side and feeds a `<video>` via Media Source Extensions.
 
 | Component | File |
 |---|---|
 | Foreground service, camera, stream lifecycle | `CctvServerService.kt` |
 | HTTP server, dashboard and WebSocket route | `WebServer.kt` |
 | Camera pipeline shared by RTSP/recording/MSE | `SharedCameraStream.kt` |
-| fmp4 muxing for the MSE preview | `Fmp4Fragmenter.kt` |
-| Per-viewer MSE broadcast and WebSocket handling | `MseVideoBridge.kt`, `MseStreamSocket.kt` |
+| Per-viewer MSE broadcast (raw NAL relay) and WebSocket handling | `MseVideoBridge.kt`, `MseStreamSocket.kt` |
 | Authentication, CSRF and HTML escaping | `WebAuth.kt` |
 | Settings | `AppPreferences.kt` |
 
@@ -222,31 +223,35 @@ cross-origin `Origin` header are rejected with `403`.
 ### Live preview (MSE)
 
 The dashboard's live preview is MSE (Media Source Extensions), not a plain HTTP endpoint:
-`WS /ws` streams fragmented MP4 (subject to the same Origin/Basic-Auth checks as every
-route above, checked once against the WebSocket upgrade request's headers). One browser
-tab opens one `/ws` connection and appends what it receives into a `MediaSource`
-`SourceBuffer`, but every connection is fed from the same fmp4 fragmenter -- any number of
-tabs can watch at once without a second hardware encode. There's no SDP/ICE negotiation:
-the socket is send-only from the phone's side, so it only works between devices that can
-reach each other directly (this app is LAN-only by design, see "Security" above).
+`WS /ws` streams raw H.264 (subject to the same Origin/Basic-Auth checks as every route
+above, checked once against the WebSocket upgrade request's headers). One browser tab
+opens one `/ws` connection; every connection is fed from the same encoder output -- any
+number of tabs can watch at once without a second hardware encode. There's no SDP/ICE
+negotiation: the socket is send-only from the phone's side, so it only works between
+devices that can reach each other directly (this app is LAN-only by design, see "Security"
+above). The preview is video-only (no audio) and requires the H264 codec -- switching to
+H265 closes every connected viewer, since the client can't decode it.
 
-The wire format is one text frame, then binary frames:
+The server does no container work at all; each tab's own `h264-converter.js` (vendored,
+the same library ws-scrcpy's web client uses) builds the fragmented MP4 itself. The wire
+format is one text frame, then binary frames:
 
 ```jsonc
-// Phone -> browser, once on connect -- the exact string for MediaSource.addSourceBuffer()
-{"codecs": "video/mp4; codecs=\"avc1.640028,mp4a.40.2\""}
+// Phone -> browser, once on connect -- the stream's frame rate, needed by the client's
+// fmp4 muxer to compute correct sample durations
+{"fps": 30}
 ```
 ```
 // Phone -> browser, binary WebSocket frames, in order:
-//   1. the fmp4 init segment (ftyp+moov)
-//   2. the most recent video keyframe fragment, if any (so playback doesn't wait out the
-//      next IDR interval)
-//   3. one moof+mdat fragment per subsequent video NAL / audio access unit
+//   1. SPS + PPS concatenated (Annex-B, start codes included)
+//   2. one raw Annex-B NAL per subsequent binary frame, straight off the encoder
 ```
 
-A codec or resolution change closes every connected `/ws` viewer (their `SourceBuffer` was
-built against the old init segment and can't be hot-swapped) -- the dashboard reconnects
-automatically and rebuilds it against the new one.
+Every new viewer is gated: NALs are dropped until a real IDR keyframe arrives (the client's
+muxer treats whatever it's given first as the keyframe, whether or not it actually is, so a
+non-IDR NAL first would build a broken init segment). A frame rate or SPS change closes
+every connected `/ws` viewer (a fresh `VideoConverter` only picks up the first SPS/PPS it's
+ever given) -- the dashboard reconnects automatically and starts a new one.
 
 If the camera isn't currently streaming, the server closes the socket immediately
 (`GoingAway`) rather than accepting an offer it has nothing to answer with -- see

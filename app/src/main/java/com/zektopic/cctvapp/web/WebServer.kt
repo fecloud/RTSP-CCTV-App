@@ -230,6 +230,10 @@ class WebServer(
             return newFixedLengthResponse(buildDashboardHtml())
         }
 
+        if (uri == "/h264-converter.js") {
+            return newFixedLengthResponse(Response.Status.OK, "application/javascript", h264ConverterJs)
+        }
+
         if (uri == "/recordings") {
             return newFixedLengthResponse(buildRecordingsHtml(RecordingsStore.listRecordings(context)))
         }
@@ -394,6 +398,7 @@ class WebServer(
      */
     private val dashboardTemplate: String by lazy { loadAsset("web/dashboard.html") }
     private val recordingsTemplate: String by lazy { loadAsset("web/recordings.html") }
+    private val h264ConverterJs: String by lazy { loadAsset("web/h264-converter.js") }
 
     private fun loadAsset(path: String): String =
         context.assets.open(path).bufferedReader().use { it.readText() }

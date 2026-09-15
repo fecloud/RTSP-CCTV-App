@@ -1,48 +1,84 @@
 package com.zektopic.cctvapp.mse
 
+import android.media.MediaCodec
+import android.media.MediaFormat
+import com.pedro.common.isKeyframe
+import com.pedro.common.toByteArray
+import com.pedro.encoder.video.GetVideoData
 import com.zektopic.cctvapp.log.AppLog as Log
-import com.zektopic.cctvapp.streaming.Fmp4Fragmenter
+import com.zektopic.cctvapp.settings.ServiceStateRepository
 import com.zektopic.cctvapp.streaming.SharedCameraStream
+import java.nio.ByteBuffer
 import java.util.concurrent.CopyOnWriteArrayList
 
 /**
- * Bridges [SharedCameraStream]'s encoded H.264 + AAC output into the dashboard's MSE preview.
- * Owns one [Fmp4Fragmenter] shared by every viewer -- all viewers just read the same broadcast
- * byte stream (see [MseStreamSocket]). Created lazily on first stream start, published via [MseBus].
+ * Bridges [SharedCameraStream]'s raw H.264 output into the dashboard's MSE preview. Unlike the
+ * fmp4-muxing design this replaced, the server does no container work at all -- it forwards raw
+ * Annex-B NAL bytes (start code included) straight from the encoder, and the dashboard's client
+ * (`h264-converter.js`, see `dashboard.html`) builds the fmp4 fragments itself, the same way
+ * ws-scrcpy's web client does. No audio track: that library is video-only.
  */
-class MseVideoBridge {
+class MseVideoBridge : GetVideoData {
 
     private companion object {
         private const val TAG = "MseVideoBridge"
     }
 
-    private val fragmenter: Fmp4Fragmenter = Fmp4Fragmenter(
-        onFragment = { fragment, kind -> broadcast(fragment, kind) },
-        hasViewers = { viewers.isNotEmpty() },
-    ).apply {
-        onInitSegmentChanged = { onInitSegmentChanged() }
-    }
+    @Volatile private var spsBytes: ByteArray? = null
+    @Volatile private var ppsBytes: ByteArray? = null
+    @Volatile private var lastFps = -1
+
+    /** The exact [SharedCameraStream] instance this is currently registered on, if any -- see [onStreamStarted]. */
+    private var registeredOn: SharedCameraStream? = null
 
     private val viewers = CopyOnWriteArrayList<MseStreamSocket>()
 
-    /** The exact [SharedCameraStream] instance [fragmenter] is currently registered on, if any -- see [onStreamStarted]. */
-    private var registeredOn: SharedCameraStream? = null
+    /** Everything a newly-connecting viewer needs to construct its own `VideoConverter`. */
+    data class ViewerHandshake(val fps: Int, val sps: ByteArray, val pps: ByteArray)
 
-    fun snapshotForNewViewer(): Fmp4Fragmenter.ViewerSnapshot? = fragmenter.snapshotForNewViewer()
+    fun snapshotForNewViewer(): ViewerHandshake? {
+        val sps = spsBytes ?: return null
+        val pps = ppsBytes ?: return null
+        return ViewerHandshake(lastFps, sps, pps)
+    }
 
     /** Called once per successful `startStream()`; listener registration is idempotent since the stream instance is a long-lived singleton. */
     fun onStreamStarted(stream: SharedCameraStream) {
-        fragmenter.setVideoSize(stream.videoWidth, stream.videoHeight)
-        fragmenter.resetSession()
+        val fps = ServiceStateRepository.settings.videoFps
+        if (lastFps != -1 && lastFps != fps) {
+            Log.d(TAG, "Frame rate changed ($lastFps -> $fps) -- closing ${viewers.size} viewer(s) so they reconnect cleanly")
+            closeAllViewers("Stream configuration changed")
+        }
+        lastFps = fps
         if (registeredOn === stream) return
         registeredOn = stream
-        stream.addVideoDataListener(fragmenter)
-        stream.addAudioDataListener(fragmenter)
+        stream.addVideoDataListener(this)
     }
 
-    /** Called instead of [onStreamStarted] when the active codec isn't H264 -- fmp4 here can't carry H265. */
+    /** Called instead of [onStreamStarted] when the active codec isn't H264 -- this bridge can't carry H265. */
     fun onUnsupportedCodec() {
         closeAllViewers("Live preview requires the H264 codec")
+    }
+
+    override fun onVideoInfo(sps: ByteBuffer, pps: ByteBuffer?, vps: ByteBuffer?) {
+        val newSps = normalizeStartCode(sps.toByteArray())
+        val newPps = pps?.toByteArray()?.let { normalizeStartCode(it) }
+        if (spsBytes != null && newPps != null && !spsBytes.contentEquals(newSps)) {
+            Log.d(TAG, "SPS changed -- closing ${viewers.size} viewer(s) so they reconnect cleanly")
+            closeAllViewers("Stream configuration changed")
+        }
+        spsBytes = newSps
+        ppsBytes = newPps
+    }
+
+    override fun onVideoFormat(mediaFormat: MediaFormat) {}
+
+    /** Called from the shared camera callback thread -- must never block. */
+    override fun getVideoData(videoBuffer: ByteBuffer, info: MediaCodec.BufferInfo) {
+        if (viewers.isEmpty()) return
+        val nal = normalizeStartCode(bufferToArray(videoBuffer, info))
+        val isKey = info.isKeyframe()
+        viewers.forEach { it.enqueue(nal, isKey) }
     }
 
     fun requestKeyframe() {
@@ -57,27 +93,46 @@ class MseVideoBridge {
         viewers.remove(socket)
     }
 
-    private fun broadcast(fragment: ByteArray, kind: Fmp4Fragmenter.FragmentKind) {
-        viewers.forEach { it.enqueue(fragment, kind) }
-    }
-
-    /** Codec/resolution changed -- every viewer's SourceBuffer is stale, so force them to reconnect against the new init segment. */
-    private fun onInitSegmentChanged() {
-        Log.d(TAG, "Init segment changed (codec/resolution restart) -- closing ${viewers.size} viewer(s) so they reconnect cleanly")
-        closeAllViewers("Stream configuration changed")
-    }
-
     private fun closeAllViewers(reason: String) {
         viewers.toList().forEach { it.closeQuietly(reason) }
     }
 
     /** Only called from the service's `onDestroy()`. */
     fun release() {
-        registeredOn?.let {
-            it.removeVideoDataListener(fragmenter)
-            it.removeAudioDataListener(fragmenter)
-        }
+        registeredOn?.removeVideoDataListener(this)
         registeredOn = null
         closeAllViewers("Server shutting down")
     }
+}
+
+/** [ByteBuffer.toByteArray] copies the whole buffer -- [info]'s offset/size mark the actual sample within it. */
+private fun bufferToArray(buffer: ByteBuffer, info: MediaCodec.BufferInfo): ByteArray {
+    val dup = buffer.duplicate()
+    dup.position(info.offset)
+    dup.limit(info.offset + info.size)
+    return ByteArray(dup.remaining()).also { dup.get(it) }
+}
+
+/**
+ * The client's NAL splitter (`h264-converter.js`'s `nalu-stream-buffer.js`) only recognizes a
+ * 4-byte Annex-B start code (`00 00 00 01`); a 3-byte one (`00 00 01`) slips through unrecognized,
+ * silently merging that NAL into whichever one follows until the next 4-byte-prefixed NAL
+ * resyncs it -- matches the pattern of a real, intermittent gap observed in the client's
+ * buffered ranges. The old `Fmp4Fragmenter` handled both forms too (see git history), which is
+ * why this suspects RootEncoder doesn't always emit a 4-byte one. Always re-prefixing with a
+ * canonical 4-byte start code, regardless of what the encoder gave us, keeps the client's parser
+ * in sync either way.
+ */
+private fun normalizeStartCode(nal: ByteArray): ByteArray {
+    val payload = when {
+        nal.size >= 4 && nal[0] == 0.toByte() && nal[1] == 0.toByte() && nal[2] == 0.toByte() && nal[3] == 1.toByte() ->
+            nal.copyOfRange(4, nal.size)
+        nal.size >= 3 && nal[0] == 0.toByte() && nal[1] == 0.toByte() && nal[2] == 1.toByte() ->
+            nal.copyOfRange(3, nal.size)
+        else -> nal
+    }
+    val result = ByteArray(4 + payload.size)
+    result[3] = 1
+    System.arraycopy(payload, 0, result, 4, payload.size)
+    return result
 }

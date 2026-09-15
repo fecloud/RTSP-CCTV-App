@@ -28,10 +28,11 @@ import java.util.concurrent.CopyOnWriteArrayList
 /**
  * Owns the camera/GL/encoder pipeline directly, in place of `RtspServerStream`/`StreamBase`
  * (`third_party/RTSP-Server`, `third_party/RootEncoder`) -- so that RTSP send, local
- * recording, and the dashboard's MSE preview (`com.zektopic.cctvapp.streaming.Fmp4Fragmenter`,
- * `com.zektopic.cctvapp.mse`) can all be direct consumers of one encoded bitstream, instead of
- * the preview needing a loopback RTSP client to re-derive it (the previous design; see git
- * history on `WebRtcVideoBridge` for why that existed and was replaced).
+ * recording, and the dashboard's MSE preview (`com.zektopic.cctvapp.mse.MseVideoBridge`, which
+ * relays raw NALs -- fmp4 muxing happens client-side, see its kdoc) can all be direct consumers
+ * of one encoded bitstream, instead of the preview needing a loopback RTSP client to re-derive
+ * it (the previous design; see git history on `WebRtcVideoBridge` for why that existed and was
+ * replaced).
  *
  * `StreamBase` itself turned out to be nothing more than orchestration glue around public,
  * independently-usable RootEncoder classes -- [Camera2Source], [GlStreamInterface],
@@ -61,7 +62,7 @@ class SharedCameraStream(
     private val glInterface = GlStreamInterface(context)
     private val rtspServer = RtspServer(connectChecker, port)
 
-    /** [com.zektopic.cctvapp.streaming.Fmp4Fragmenter] (MSE preview) registers here -- RTSP send and recording are always-on, hardwired below. */
+    /** [com.zektopic.cctvapp.mse.MseVideoBridge] (MSE preview) registers here -- RTSP send and recording are always-on, hardwired below. */
     private val extraVideoListeners = CopyOnWriteArrayList<GetVideoData>()
 
     /** Same purpose as [extraVideoListeners], for the audio side. */
@@ -116,10 +117,6 @@ class SharedCameraStream(
     var isStreaming = false
         private set
     val isRecording: Boolean get() = recordController.isRunning()
-
-    /** The encoder's actual configured resolution -- `Fmp4Fragmenter` needs this for its fmp4 `stsd`/`tkhd` boxes. */
-    val videoWidth: Int get() = videoEncoder.width
-    val videoHeight: Int get() = videoEncoder.height
 
     /** Mirrors `StreamBase.prepareAudio` -- must be called before [startStream]/[startRecord]. */
     fun prepareAudio(sampleRate: Int, isStereo: Boolean, bitrate: Int): Boolean {

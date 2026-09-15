@@ -1,9 +1,9 @@
 package com.zektopic.cctvapp.mse
 
 import com.zektopic.cctvapp.log.AppLog as Log
-import com.zektopic.cctvapp.streaming.Fmp4Fragmenter
 import fi.iki.elonen.NanoHTTPD.IHTTPSession
 import fi.iki.elonen.NanoWSD
+import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.atomic.AtomicBoolean
@@ -11,10 +11,12 @@ import org.json.JSONObject
 
 /**
  * One instance per browser tab -- created by [com.zektopic.cctvapp.web.WebServer.openWebSocket]
- * for every `/ws` connection. Send-only: on [onOpen] it sends the codecs control message and the
- * init segment, then registers with [MseVideoBridge] for the ongoing broadcast -- [enqueue] drops
- * video deltas from that broadcast until a fresh keyframe arrives, since this viewer's decoder has
- * no valid reference chain before then. See `dashboard.html` for the client side.
+ * for every `/ws` connection. Send-only: on [onOpen] it sends the `fps` control message and the
+ * SPS+PPS, then registers with [MseVideoBridge] for the ongoing broadcast of raw NALs -- [enqueue]
+ * drops non-keyframe NALs from that broadcast until a fresh keyframe arrives, since this viewer's
+ * `h264-converter.js` `VideoConverter` has no valid reference chain before then (and, unlike a
+ * real decoder, would otherwise happily treat whatever NAL it sees first as if it were one). See
+ * `dashboard.html` for the client side.
  *
  * [authorized] is decided in `openWebSocket()` from the handshake headers -- NanoWSD always
  * completes the 101 handshake regardless, so an unauthorized connection is closed in [onOpen].
@@ -43,8 +45,11 @@ class MseStreamSocket(
     /** [onClose] can race between the read loop and the sender thread both closing the same connection -- makes the second call a no-op. */
     private val closed = AtomicBoolean(false)
 
-    /** Video deltas are undecodable until a keyframe resyncs this viewer -- see [Fmp4Fragmenter.FragmentKind]. */
+    /** Non-keyframe NALs are undecodable until a keyframe resyncs this viewer -- see [enqueue]. */
     @Volatile private var awaitingKeyframe = true
+
+    /** Diagnostic only -- how many NALs got dropped during the current gated stretch, logged once it clears. */
+    @Volatile private var droppedDeltaCount = 0
 
     /** Set by [enqueue] on a dropped frame; consumed by the keepalive thread so the encoder is never called from the camera callback thread. */
     @Volatile private var needsKeyframeRequest = false
@@ -55,16 +60,20 @@ class MseStreamSocket(
             return
         }
         val activeBridge = MseBus.bridge.get()
-        val snapshot = activeBridge?.snapshotForNewViewer()
-        if (activeBridge == null || snapshot == null) {
+        val handshake = activeBridge?.snapshotForNewViewer()
+        if (activeBridge == null || handshake == null) {
             closeQuietly("Camera not streaming", NanoWSD.WebSocketFrame.CloseCode.GoingAway)
             return
         }
         try {
-            send(JSONObject().put("codecs", snapshot.codecs).toString())
-            send(snapshot.initSegment)
+            send(JSONObject().put("fps", handshake.fps).toString())
+            val spsAndPps = ByteArrayOutputStream(handshake.sps.size + handshake.pps.size).apply {
+                write(handshake.sps)
+                write(handshake.pps)
+            }.toByteArray()
+            send(spsAndPps)
         } catch (e: IOException) {
-            Log.e(TAG, "Failed to send init segment", e)
+            Log.e(TAG, "Failed to send SPS/PPS", e)
             closeQuietly("Init send failed", NanoWSD.WebSocketFrame.CloseCode.AbnormalClosure)
             return
         }
@@ -75,18 +84,32 @@ class MseStreamSocket(
         startKeepAlive()
     }
 
-    /** Called from [MseVideoBridge.broadcast] on the shared camera callback thread -- must never block. */
-    fun enqueue(fragment: ByteArray, kind: Fmp4Fragmenter.FragmentKind) {
-        if (kind == Fmp4Fragmenter.FragmentKind.VIDEO_DELTA && awaitingKeyframe) return
-        if (kind == Fmp4Fragmenter.FragmentKind.VIDEO_KEYFRAME) awaitingKeyframe = false
-        if (!pending.offer(fragment)) {
-            // A full queue means we're about to evict the oldest queued fragment, which could be
-            // a video delta -- its loss breaks the reference chain just as surely as the gate
+    /** Called from [MseVideoBridge.getVideoData] on the shared camera callback thread -- must never block. */
+    fun enqueue(nal: ByteArray, isKeyframe: Boolean) {
+        if (!isKeyframe && awaitingKeyframe) {
+            droppedDeltaCount++
+            return
+        }
+        if (isKeyframe) {
+            if (droppedDeltaCount > 0) Log.d(TAG, "Resynced by fresh keyframe after dropping $droppedDeltaCount NAL(s)")
+            droppedDeltaCount = 0
+            awaitingKeyframe = false
+        }
+        if (!pending.offer(nal)) {
+            // A full queue means we're about to evict the oldest queued NAL, which could be a
+            // non-keyframe one -- its loss breaks the reference chain just as surely as the gate
             // above, so re-gate and ask for a fresh keyframe instead of waiting out the next one.
+            // Unless this NAL IS that fresh keyframe: it just resynced the chain regardless of
+            // whatever got evicted before it, so don't immediately undo the line above --
+            // confirmed on-device as a real bug (a keyframe hitting a full queue re-armed the
+            // gate on itself, silently dropping every frame after it forever).
             pending.poll()
-            pending.offer(fragment)
-            awaitingKeyframe = true
-            needsKeyframeRequest = true
+            pending.offer(nal)
+            if (!isKeyframe) {
+                if (!awaitingKeyframe) Log.w(TAG, "Send queue full, re-gating viewer and requesting a fresh keyframe")
+                awaitingKeyframe = true
+                needsKeyframeRequest = true
+            }
         }
     }
 
