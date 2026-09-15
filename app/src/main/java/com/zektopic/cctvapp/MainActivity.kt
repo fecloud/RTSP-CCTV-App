@@ -77,6 +77,8 @@ class MainActivity : AppCompatActivity() {
     private val overlaySizes = arrayOf("Small", "Medium", "Large")
     private val bitrateLabels = arrayOf("500 Kbps", "1 Mbps", "2 Mbps", "4 Mbps", "6 Mbps", "8 Mbps")
     private val bitrateKbpsValues = intArrayOf(500, 1000, 2000, 4000, 6000, 8000)
+    private val fpsLabels = arrayOf("15 fps", "25 fps", "30 fps")
+    private val fpsValues = intArrayOf(15, 25, 30)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -126,6 +128,10 @@ class MainActivity : AppCompatActivity() {
         binding.spinnerBitrate.setAdapter(
             ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, bitrateLabels)
         )
+
+        binding.spinnerFps.setAdapter(
+            ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, fpsLabels)
+        )
     }
 
     private fun loadSavedSettings() {
@@ -146,6 +152,11 @@ class MainActivity : AppCompatActivity() {
         val savedBitrateIndex = bitrateKbpsValues.indexOf(s.bitrateKbps)
             .let { if (it >= 0) it else bitrateKbpsValues.indexOf(AppPreferences.DEFAULT_BITRATE_KBPS) }
         binding.spinnerBitrate.setText(bitrateLabels[savedBitrateIndex], false)
+
+        // Load saved frame rate
+        val savedFpsIndex = fpsValues.indexOf(s.videoFps)
+            .let { if (it >= 0) it else fpsValues.indexOf(AppPreferences.DEFAULT_VIDEO_FPS) }
+        binding.spinnerFps.setText(fpsLabels[savedFpsIndex], false)
 
         // Load saved auth settings
         binding.switchAuth.isChecked = s.authEnabled
@@ -224,6 +235,11 @@ class MainActivity : AppCompatActivity() {
         binding.spinnerBitrate.setOnItemClickListener { _, _, position, _ ->
             val kbps = bitrateKbpsValues[position]
             ServiceStateRepository.updateSettings(this) { it.copy(bitrateKbps = kbps) }
+        }
+
+        binding.spinnerFps.setOnItemClickListener { _, _, position, _ ->
+            val fps = fpsValues[position]
+            ServiceStateRepository.updateSettings(this) { it.copy(videoFps = fps) }
         }
 
         // Auth listeners

@@ -43,6 +43,10 @@ class SettingUpdateHandler(private val context: Context) {
                 val coerced = requested.coerceIn(AppPreferences.BITRATE_MIN_KBPS, AppPreferences.BITRATE_MAX_KBPS)
                 ServiceStateRepository.updateSettings(context) { it.copy(bitrateKbps = coerced) }
             }
+            "video_fps" -> value.toIntOrNull()?.let { requested ->
+                val coerced = requested.coerceIn(AppPreferences.FPS_MIN, AppPreferences.FPS_MAX)
+                ServiceStateRepository.updateSettings(context) { it.copy(videoFps = coerced) }
+            }
             "web_auth_enabled" ->
                 ServiceStateRepository.updateSettings(context) { it.copy(webAuthEnabled = value.toBoolean()) }
             "record_to_gallery_enabled" ->

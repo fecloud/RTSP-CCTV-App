@@ -35,6 +35,7 @@ androidx-recyclerview = { group = "androidx.recyclerview", name = "recyclerview"
 rootencoder-library = { group = "com.github.pedroSG94.RootEncoder", name = "library", version.ref = "rootEncoder" }
 rtsp-server = { group = "com.github.pedroSG94", name = "RTSP-Server", version.ref = "rtspServer" }
 nanohttpd = { group = "org.nanohttpd", name = "nanohttpd", version.ref = "nanohttpd" }
+nanohttpd-websocket = { group = "org.nanohttpd", name = "nanohttpd-websocket", version.ref = "nanohttpd" }
 kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "kotlinxCoroutines" }
 bugly-crashreport = { group = "com.tencent.bugly", name = "crashreport", version.ref = "buglyCrashreport" }
 

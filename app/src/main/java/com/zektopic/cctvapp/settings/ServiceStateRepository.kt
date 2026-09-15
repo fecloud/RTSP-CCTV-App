@@ -79,6 +79,7 @@ object ServiceStateRepository {
         AppPreferences.setVerticalFlipEnabled(context, s.verticalFlipEnabled)
         AppPreferences.setZoomLevel(context, s.zoomLevel)
         AppPreferences.setBitrateKbps(context, s.bitrateKbps)
+        AppPreferences.setVideoFps(context, s.videoFps)
         AppPreferences.setRecordToGalleryEnabled(context, s.recordToGalleryEnabled)
         AppPreferences.setRecordSegmentMinutes(context, s.recordSegmentMinutes)
         AppPreferences.setRecordStorageThresholdPercent(context, s.recordStorageThresholdPercent)

@@ -5,6 +5,7 @@
     <string name="video_codec">Video Codec</string>
     <string name="resolution">Resolution</string>
     <string name="bitrate">Bitrate (kbps)</string>
+    <string name="frame_rate">Frame Rate (fps)</string>
     <string name="switch_camera">Switch Camera</string>
     <string name="device_ip_address">Device IP Address:</string>
     <string name="stream_url_guide">You can view the stream at rtsp://[YOUR_IP]:8554/stream</string>

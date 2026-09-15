@@ -10,6 +10,7 @@ import android.os.StatFs
 import com.zektopic.cctvapp.log.AppLog as Log
 import java.io.File
 import java.net.Inet4Address
+import java.net.NetworkInterface
 
 object DeviceStatsUtil {
     private const val TAG = "DeviceStatsUtil"
@@ -121,14 +122,46 @@ object DeviceStatsUtil {
         }
     }
 
+    /**
+     * Best address for another device on the LAN to reach this phone at -- recomputed on
+     * every call (not cached) since it can change at any point while the service keeps
+     * running (Wi-Fi network switches, hotspot toggled, etc.).
+     *
+     * `ConnectivityManager.activeNetwork` only ever reflects this phone's own *upstream*
+     * route (e.g. the Wi-Fi it joined) -- never a SoftAP/hotspot interface it's serving to
+     * other devices, since the phone isn't "connected to" that network, it's providing it.
+     * So a computer that joined this phone's hotspot could never reach the address this
+     * function used to return in that case; a phone with both a Wi-Fi connection and its
+     * own hotspot active at once has two independent up `wlan*` interfaces simultaneously,
+     * confirmed on-device (`wlan0` client + `wlan2` `ROLE_SOFTAP_TETHERED`). There's no
+     * public, non-reflection API to ask "what's the SoftAp IP" directly (`WifiManager
+     * .isWifiApEnabled()` has been `@hide` since API 26), so this instead looks for a
+     * second up, non-loopback `wlan*` interface distinct from the active network's own --
+     * true whenever hotspot + Wi-Fi client are both on, which is the overwhelmingly likely
+     * reason a phone would have two such interfaces up at once.
+     */
     fun getIpAddress(context: Context): String {
         val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
         val activeNetwork = connectivityManager.activeNetwork
         val linkProperties = connectivityManager.getLinkProperties(activeNetwork)
-        val ipv4Address = linkProperties?.linkAddresses?.firstOrNull {
+        val activeInterfaceName = linkProperties?.interfaceName
+        val activeIpv4Address = linkProperties?.linkAddresses?.firstOrNull {
             it.address is Inet4Address && !it.address.isLoopbackAddress
         }?.address?.hostAddress
-        return ipv4Address ?: "0.0.0.0"
+
+        val hotspotIpv4Address = runCatching {
+            NetworkInterface.getNetworkInterfaces().asSequence()
+                .filter {
+                    it.isUp && !it.isLoopback && it.name.startsWith("wlan", ignoreCase = true) &&
+                        it.name != activeInterfaceName
+                }
+                .flatMap { it.inetAddresses.asSequence() }
+                .filterIsInstance<Inet4Address>()
+                .firstOrNull { !it.isLoopbackAddress }
+                ?.hostAddress
+        }.getOrNull()
+
+        return hotspotIpv4Address ?: activeIpv4Address ?: "0.0.0.0"
     }
 
     fun usedPercent(statFs: StatFs): Int {

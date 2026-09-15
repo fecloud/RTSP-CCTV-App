@@ -151,6 +151,20 @@ object AppPreferences {
         prefs(context).edit { putFloat(KEY_ZOOM_LEVEL, zoom.coerceIn(min, max)) }
     }
 
+    // --- Frame Rate ---
+    private const val KEY_VIDEO_FPS = "video_fps"
+
+    const val FPS_MIN = 5
+    const val FPS_MAX = 30
+    const val DEFAULT_VIDEO_FPS = 25
+
+    fun getVideoFps(context: Context): Int =
+        prefs(context).getInt(KEY_VIDEO_FPS, DEFAULT_VIDEO_FPS).coerceIn(FPS_MIN, FPS_MAX)
+
+    fun setVideoFps(context: Context, fps: Int) {
+        prefs(context).edit { putInt(KEY_VIDEO_FPS, fps.coerceIn(FPS_MIN, FPS_MAX)) }
+    }
+
     // --- Bitrate ---
     private const val KEY_BITRATE_KBPS = "bitrate_kbps"
 

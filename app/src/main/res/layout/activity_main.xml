@@ -98,6 +98,84 @@
         </com.google.android.material.card.MaterialCardView>
 
         <!-- ═══════════════════════════════════════ -->
+        <!-- Camera Controls Card                   -->
+        <!-- ═══════════════════════════════════════ -->
+        <com.google.android.material.card.MaterialCardView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="12dp"
+            app:cardCornerRadius="16dp"
+            app:cardElevation="2dp"
+            app:contentPadding="20dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="12dp"
+                    android:text="@string/section_camera_controls"
+                    android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
+                    android:textColor="?attr/colorPrimary" />
+
+                <!-- Flashlight Toggle -->
+                <com.google.android.material.materialswitch.MaterialSwitch
+                    android:id="@+id/switch_flashlight"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="@string/flashlight_toggle"
+                    android:textAppearance="@style/TextAppearance.Material3.BodyLarge" />
+
+                <!-- Night Mode Toggle -->
+                <com.google.android.material.materialswitch.MaterialSwitch
+                    android:id="@+id/switch_night_mode"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:text="@string/night_mode_toggle"
+                    android:textAppearance="@style/TextAppearance.Material3.BodyLarge" />
+
+                <!-- Vertical Flip Toggle -->
+                <com.google.android.material.materialswitch.MaterialSwitch
+                    android:id="@+id/switch_vertical_flip"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:text="@string/vertical_flip_toggle"
+                    android:textAppearance="@style/TextAppearance.Material3.BodyLarge" />
+
+                <!-- Zoom -->
+                <TextView
+                    android:id="@+id/label_zoom_level"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="16dp"
+                    android:text="@string/zoom_level"
+                    android:textAppearance="@style/TextAppearance.Material3.BodyMedium" />
+
+                <com.google.android.material.slider.Slider
+                    android:id="@+id/slider_zoom_level"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:stepSize="0.1"
+                    android:value="1.0"
+                    android:valueFrom="1.0"
+                    android:valueTo="8.0" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/zoom_level_hint"
+                    android:textAppearance="@style/TextAppearance.Material3.BodySmall"
+                    android:textColor="?attr/colorOnSurfaceVariant" />
+
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <!-- ═══════════════════════════════════════ -->
         <!-- Video Settings Card                     -->
         <!-- ═══════════════════════════════════════ -->
         <com.google.android.material.card.MaterialCardView
@@ -165,6 +243,23 @@
 
                     <AutoCompleteTextView
                         android:id="@+id/spinner_bitrate"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:inputType="none"
+                        tools:ignore="LabelFor" />
+                </com.google.android.material.textfield.TextInputLayout>
+
+                <!-- Frame Rate -->
+                <com.google.android.material.textfield.TextInputLayout
+                    android:id="@+id/menu_fps"
+                    style="@style/Widget.Material3.TextInputLayout.OutlinedBox.ExposedDropdownMenu"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:hint="@string/frame_rate">
+
+                    <AutoCompleteTextView
+                        android:id="@+id/spinner_fps"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:inputType="none"
@@ -376,84 +471,6 @@
                         android:inputType="none"
                         tools:ignore="LabelFor" />
                 </com.google.android.material.textfield.TextInputLayout>
-
-            </LinearLayout>
-        </com.google.android.material.card.MaterialCardView>
-
-        <!-- ═══════════════════════════════════════ -->
-        <!-- Camera Controls Card                   -->
-        <!-- ═══════════════════════════════════════ -->
-        <com.google.android.material.card.MaterialCardView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginBottom="12dp"
-            app:cardCornerRadius="16dp"
-            app:cardElevation="2dp"
-            app:contentPadding="20dp">
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical">
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginBottom="12dp"
-                    android:text="@string/section_camera_controls"
-                    android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                    android:textColor="?attr/colorPrimary" />
-
-                <!-- Flashlight Toggle -->
-                <com.google.android.material.materialswitch.MaterialSwitch
-                    android:id="@+id/switch_flashlight"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="@string/flashlight_toggle"
-                    android:textAppearance="@style/TextAppearance.Material3.BodyLarge" />
-
-                <!-- Night Mode Toggle -->
-                <com.google.android.material.materialswitch.MaterialSwitch
-                    android:id="@+id/switch_night_mode"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="4dp"
-                    android:text="@string/night_mode_toggle"
-                    android:textAppearance="@style/TextAppearance.Material3.BodyLarge" />
-
-                <!-- Vertical Flip Toggle -->
-                <com.google.android.material.materialswitch.MaterialSwitch
-                    android:id="@+id/switch_vertical_flip"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="4dp"
-                    android:text="@string/vertical_flip_toggle"
-                    android:textAppearance="@style/TextAppearance.Material3.BodyLarge" />
-
-                <!-- Zoom -->
-                <TextView
-                    android:id="@+id/label_zoom_level"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="16dp"
-                    android:text="@string/zoom_level"
-                    android:textAppearance="@style/TextAppearance.Material3.BodyMedium" />
-
-                <com.google.android.material.slider.Slider
-                    android:id="@+id/slider_zoom_level"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:stepSize="0.1"
-                    android:value="1.0"
-                    android:valueFrom="1.0"
-                    android:valueTo="8.0" />
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="@string/zoom_level_hint"
-                    android:textAppearance="@style/TextAppearance.Material3.BodySmall"
-                    android:textColor="?attr/colorOnSurfaceVariant" />
 
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>

@@ -103,7 +103,8 @@
             align-items: center;
             justify-content: center;
         }
-        .preview-wrapper img {
+        .preview-wrapper img,
+        .preview-wrapper video {
             width: 100%;
             height: 100%;
             object-fit: contain;
@@ -406,7 +407,9 @@
         <!-- Preview -->
         <div class="preview-card">
             <div class="preview-wrapper">
-                <img id="cam-preview" src="/shot.jpg" alt="Live Preview" />
+                <!-- muted so autoplay is never blocked by browser policy -- the user can
+                     unmute via native controls' own icon whenever they want sound. -->
+                <video id="cam-preview" autoplay muted playsinline controls></video>
                 <div class="preview-overlay">
                     <span class="chip" id="chipRec" style="display:none;color:var(--danger);">● REC</span>
                     <span class="chip" id="chipCodec">—</span>
@@ -425,72 +428,6 @@
             </div>
         </div>
         
-        <!-- Video Settings -->
-        <div class="settings-card">
-            <h3>Video Settings</h3>
-            <div class="setting-row">
-                <span class="setting-label">Codec</span>
-                <div class="select-wrap">
-                    <select id="codecSelect" onchange="changeCodec(this.value)">
-                        <option value="H264">H.264</option>
-                        <option value="H265">H.265</option>
-                    </select>
-                </div>
-            </div>
-            <div class="setting-row">
-                <span class="setting-label">Resolution</span>
-                <div class="select-wrap">
-                    <select id="resSelect" onchange="changeResolution(this.value)"></select>
-                </div>
-            </div>
-            <div class="setting-row">
-                <span class="setting-label">Bitrate</span>
-                <div class="select-wrap">
-                    <select id="bitrateSelect" onchange="changeBitrate(this.value)">
-                        <option value="500">500 Kbps</option>
-                        <option value="1000">1 Mbps</option>
-                        <option value="2000">2 Mbps</option>
-                        <option value="4000">4 Mbps</option>
-                        <option value="6000">6 Mbps</option>
-                        <option value="8000">8 Mbps</option>
-                    </select>
-                </div>
-            </div>
-        </div>
-
-        <!-- Overlay Settings -->
-        <div class="settings-card">
-            <h3>Overlay</h3>
-            <div class="setting-row">
-                <span class="setting-label">Show Date &amp; Time</span>
-                <label class="toggle">
-                    <input type="checkbox" id="toggleTimestamp" onchange="setSetting('show_timestamp', this.checked)">
-                    <span class="toggle-track"></span>
-                </label>
-            </div>
-            <div class="setting-row">
-                <span class="setting-label">Position</span>
-                <div class="select-wrap">
-                    <select id="posSelect" onchange="setSetting('timestamp_position', this.value)">
-                        <option value="Top Left">Top Left</option>
-                        <option value="Top Right">Top Right</option>
-                        <option value="Bottom Left">Bottom Left</option>
-                        <option value="Bottom Right">Bottom Right</option>
-                    </select>
-                </div>
-            </div>
-            <div class="setting-row">
-                <span class="setting-label">Text Size</span>
-                <div class="select-wrap">
-                    <select id="sizeSelect" onchange="setSetting('timestamp_size', this.value)">
-                        <option value="Small">Small</option>
-                        <option value="Medium">Medium</option>
-                        <option value="Large">Large</option>
-                    </select>
-                </div>
-            </div>
-        </div>
-
         <!-- Camera Controls -->
         <div class="settings-card">
             <h3>Camera Controls</h3>
@@ -528,6 +465,82 @@
                 </div>
                 <input type="range" class="range-slider" id="zoomSlider" min="1" max="8" step="0.1" value="1"
                        oninput="onZoomInput(this.value)" onchange="onZoomChange(this.value)">
+            </div>
+        </div>
+
+        <!-- Video Settings -->
+        <div class="settings-card">
+            <h3>Video Settings</h3>
+            <div class="setting-row">
+                <span class="setting-label">Codec</span>
+                <div class="select-wrap">
+                    <select id="codecSelect" onchange="changeCodec(this.value)">
+                        <option value="H264">H.264</option>
+                        <option value="H265">H.265</option>
+                    </select>
+                </div>
+            </div>
+            <div class="setting-row">
+                <span class="setting-label">Resolution</span>
+                <div class="select-wrap">
+                    <select id="resSelect" onchange="changeResolution(this.value)"></select>
+                </div>
+            </div>
+            <div class="setting-row">
+                <span class="setting-label">Bitrate</span>
+                <div class="select-wrap">
+                    <select id="bitrateSelect" onchange="changeBitrate(this.value)">
+                        <option value="500">500 Kbps</option>
+                        <option value="1000">1 Mbps</option>
+                        <option value="2000">2 Mbps</option>
+                        <option value="4000">4 Mbps</option>
+                        <option value="6000">6 Mbps</option>
+                        <option value="8000">8 Mbps</option>
+                    </select>
+                </div>
+            </div>
+            <div class="setting-row">
+                <span class="setting-label">Frame Rate</span>
+                <div class="select-wrap">
+                    <select id="fpsSelect" onchange="changeFps(this.value)">
+                        <option value="15">15 fps</option>
+                        <option value="25">25 fps</option>
+                        <option value="30">30 fps</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+
+        <!-- Overlay Settings -->
+        <div class="settings-card">
+            <h3>Overlay</h3>
+            <div class="setting-row">
+                <span class="setting-label">Show Date &amp; Time</span>
+                <label class="toggle">
+                    <input type="checkbox" id="toggleTimestamp" onchange="setSetting('show_timestamp', this.checked)">
+                    <span class="toggle-track"></span>
+                </label>
+            </div>
+            <div class="setting-row">
+                <span class="setting-label">Position</span>
+                <div class="select-wrap">
+                    <select id="posSelect" onchange="setSetting('timestamp_position', this.value)">
+                        <option value="Top Left">Top Left</option>
+                        <option value="Top Right">Top Right</option>
+                        <option value="Bottom Left">Bottom Left</option>
+                        <option value="Bottom Right">Bottom Right</option>
+                    </select>
+                </div>
+            </div>
+            <div class="setting-row">
+                <span class="setting-label">Text Size</span>
+                <div class="select-wrap">
+                    <select id="sizeSelect" onchange="setSetting('timestamp_size', this.value)">
+                        <option value="Small">Small</option>
+                        <option value="Medium">Medium</option>
+                        <option value="Large">Large</option>
+                    </select>
+                </div>
             </div>
         </div>
 
@@ -637,14 +650,183 @@
                 .then(() => { showToast('Bitrate: ' + v + ' kbps'); fetchStatus(); });
         }
 
-        // --- Preview auto-refresh ---
-        const img = document.getElementById('cam-preview');
-        setInterval(() => {
-            const newImg = new Image();
-            newImg.onload = () => { img.src = newImg.src; };
-            newImg.src = '/shot.jpg?t=' + Date.now();
-        }, 500);
-        
+        function changeFps(v) {
+            fetch('/action/set-setting?key=video_fps&value=' + encodeURIComponent(v), POST)
+                .then(() => { showToast('Frame rate: ' + v + ' fps'); fetchStatus(); });
+        }
+
+        // --- MSE live preview ---
+        // Wire format over /ws (see MseStreamSocket.kt): one text control message with the
+        // codecs string, then binary fmp4 fragments appended into a MediaSource SourceBuffer.
+        // <video> is muted so autoplay is never blocked; users can unmute via native controls.
+        // SourceBuffer.mode is 'segments' -- a new viewer seeks to `buffered.start(0)` (the
+        // intersection of both tracks' ranges) rather than trusting position 0.
+        const MSE_PREVIEW = {
+            BUFFER_RETENTION_SECONDS: 30,
+            // Catch-up: nudge playbackRate when behind live, like hls.js/dash.js.
+            CATCHUP_TRIGGER_SECONDS: 0.6,
+            CATCHUP_RESET_SECONDS: 0.2,
+            CATCHUP_PLAYBACK_RATE: 1.25,
+            PERIODIC_CHECK_INTERVAL_MS: 10000,
+            RECONNECT_DELAY_MS: 2000,
+            // Forces a reconnect if no bytes arrive for this long (the WS can go silently dead).
+            WATCHDOG_INTERVAL_MS: 3000,
+            STALL_TIMEOUT_MS: 8000,
+            // currentTime can stop advancing even while data keeps appending fine (a decode
+            // stall, not a buffering wait) -- seek to the live edge once stuck this long.
+            PLAYBACK_FROZEN_RECOVER_MS: 1500,
+            // If seeking in place doesn't unstick a frozen decode after this many tries, force a
+            // full reconnect instead of continuing to fight a possibly-wedged MediaSource.
+            MAX_FROZEN_RECOVERIES_BEFORE_RECONNECT: 2,
+        };
+
+        let mseObjectUrl = null;
+
+        function startMsePreview() {
+            const video = document.getElementById('cam-preview');
+            const mediaSource = new MediaSource();
+            if (mseObjectUrl) URL.revokeObjectURL(mseObjectUrl); // previous session's blob URL would otherwise leak
+            mseObjectUrl = URL.createObjectURL(mediaSource);
+            video.src = mseObjectUrl;
+            video.playbackRate = 1.0; // don't inherit a sped-up rate from a previous session
+
+            let sourceBuffer = null;
+            let periodicTimer = null;
+            let watchdogTimer = null;
+            let seekedToLiveEdge = false;
+            let lastDataAt = Date.now();
+            let lastPlaybackTime = -1;
+            let frozenSince = -1;
+            let consecutiveFrozenRecoveries = 0;
+            let ws = null;
+            const pendingChunks = [];
+
+            function appendNextChunk() {
+                if (!sourceBuffer || sourceBuffer.updating || pendingChunks.length === 0) return;
+                const chunk = pendingChunks.shift();
+                try {
+                    sourceBuffer.appendBuffer(chunk);
+                } catch (e) {
+                    // Likely QuotaExceededError -- make room and retry instead of dropping the chunk.
+                    console.error('appendBuffer failed, trimming and retrying', e);
+                    pendingChunks.unshift(chunk);
+                    trimBuffer(/* aggressive= */ true);
+                }
+            }
+
+            function trimBuffer(aggressive) {
+                if (!sourceBuffer || sourceBuffer.updating || sourceBuffer.buffered.length === 0) return;
+                const retention = aggressive
+                    ? MSE_PREVIEW.BUFFER_RETENTION_SECONDS / 3
+                    : MSE_PREVIEW.BUFFER_RETENTION_SECONDS;
+                const removeEnd = video.currentTime - retention;
+                if (removeEnd > sourceBuffer.buffered.start(0)) sourceBuffer.remove(0, removeEnd);
+            }
+
+            function seekToLiveEdgeOnce() {
+                if (seekedToLiveEdge || !sourceBuffer || sourceBuffer.buffered.length === 0) return;
+                seekedToLiveEdge = true;
+                video.currentTime = sourceBuffer.buffered.start(0);
+            }
+
+            // autoplay alone doesn't always resume after the seek above; retry play() until it sticks.
+            function resumeIfPaused() {
+                if (!video.paused || !sourceBuffer || sourceBuffer.buffered.length === 0) return;
+                video.play().catch(() => {});
+            }
+
+            function recoverIfFrozen() {
+                if (!sourceBuffer || sourceBuffer.buffered.length === 0) return;
+                const currentTime = video.currentTime;
+                const liveEdge = sourceBuffer.buffered.end(sourceBuffer.buffered.length - 1);
+                const hasDataAhead = liveEdge - currentTime > MSE_PREVIEW.CATCHUP_RESET_SECONDS;
+                if (currentTime !== lastPlaybackTime || !hasDataAhead) {
+                    lastPlaybackTime = currentTime;
+                    frozenSince = -1;
+                    consecutiveFrozenRecoveries = 0;
+                    return;
+                }
+                if (frozenSince === -1) {
+                    frozenSince = Date.now();
+                    return;
+                }
+                if (Date.now() - frozenSince < MSE_PREVIEW.PLAYBACK_FROZEN_RECOVER_MS) return;
+                frozenSince = -1;
+                consecutiveFrozenRecoveries++;
+                if (consecutiveFrozenRecoveries > MSE_PREVIEW.MAX_FROZEN_RECOVERIES_BEFORE_RECONNECT) {
+                    console.warn('MSE preview still frozen after seeking in place, forcing full reconnect');
+                    consecutiveFrozenRecoveries = 0;
+                    if (ws) ws.close();
+                    return;
+                }
+                console.warn('MSE preview frozen, seeking to live edge');
+                video.currentTime = liveEdge;
+                video.play().catch(() => {});
+            }
+
+            function catchUpToLiveEdge() {
+                if (!sourceBuffer || sourceBuffer.buffered.length === 0) return;
+                const liveEdge = sourceBuffer.buffered.end(sourceBuffer.buffered.length - 1);
+                const delay = liveEdge - video.currentTime;
+                if (delay > MSE_PREVIEW.CATCHUP_TRIGGER_SECONDS) {
+                    video.playbackRate = MSE_PREVIEW.CATCHUP_PLAYBACK_RATE;
+                } else if (delay < MSE_PREVIEW.CATCHUP_RESET_SECONDS) {
+                    video.playbackRate = 1.0;
+                }
+            }
+
+            function onBufferSettled() {
+                appendNextChunk();
+                seekToLiveEdgeOnce();
+                resumeIfPaused();
+                recoverIfFrozen();
+                catchUpToLiveEdge();
+                trimBuffer(false);
+            }
+
+            mediaSource.addEventListener('sourceopen', () => {
+                const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+                ws = new WebSocket(wsProtocol + '//' + location.host + '/ws');
+                ws.binaryType = 'arraybuffer';
+
+                lastDataAt = Date.now();
+                watchdogTimer = setInterval(() => {
+                    if (Date.now() - lastDataAt > MSE_PREVIEW.STALL_TIMEOUT_MS) {
+                        console.warn('MSE preview stalled, forcing reconnect');
+                        ws.close();
+                    }
+                }, MSE_PREVIEW.WATCHDOG_INTERVAL_MS);
+
+                ws.onmessage = (event) => {
+                    lastDataAt = Date.now();
+                    if (typeof event.data === 'string') {
+                        const msg = JSON.parse(event.data);
+                        sourceBuffer = mediaSource.addSourceBuffer(msg.codecs);
+                        sourceBuffer.mode = 'segments';
+                        sourceBuffer.addEventListener('updateend', onBufferSettled);
+                        periodicTimer = setInterval(() => {
+                            trimBuffer(false);
+                            resumeIfPaused();
+                            recoverIfFrozen();
+                            catchUpToLiveEdge();
+                        }, MSE_PREVIEW.PERIODIC_CHECK_INTERVAL_MS);
+                        return;
+                    }
+                    pendingChunks.push(new Uint8Array(event.data));
+                    appendNextChunk();
+                };
+                // Reconnects on close for any reason: not streaming yet, a codec/resolution
+                // restart, or the watchdog above forcing one.
+                ws.onclose = () => {
+                    clearInterval(periodicTimer);
+                    clearInterval(watchdogTimer);
+                    setTimeout(startMsePreview, MSE_PREVIEW.RECONNECT_DELAY_MS);
+                };
+                ws.onerror = () => ws.close();
+            }, { once: true });
+        }
+        startMsePreview();
+
         // --- Resolution options ---
         // Populated once from the camera's real supported sizes (falls back to a
         // small static list if the device somehow reports none), then left alone --
@@ -750,6 +932,7 @@
                         zoomValueText.textContent = Number(data.zoomLevel).toFixed(1) + 'x';
                     }
                     document.getElementById('bitrateSelect').value = data.bitrateKbps;
+                    document.getElementById('fpsSelect').value = data.videoFps;
 
                     // Sync recording
                     document.getElementById('toggleRecordToGallery').checked = data.recordToGalleryEnabled;
