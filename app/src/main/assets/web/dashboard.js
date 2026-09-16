@@ -95,7 +95,7 @@ function fetchStatus() {
             batteryBadge.title = data.isCharging === true ? 'Battery (Charging)' : 'Battery';
             if (data.wifiStrength >= 0) wifiText.textContent = data.wifiStrength + '%';
             if (data.cpuTempCelsius !== null && data.cpuTempCelsius !== undefined) {
-                cpuTempText.textContent = data.cpuTempCelsius + '°C';
+                cpuTempText.textContent = data.cpuTempCelsius.toFixed(1) + '°C';
             }
             if (typeof data.uptimeMillis === 'number') {
                 uptimeText.textContent = formatUptime(data.uptimeMillis);
