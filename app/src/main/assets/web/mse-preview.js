@@ -316,7 +316,7 @@ function startMsePreview() {
             // helps but added too much latency; 3/2 (~120-130ms/fragment, ~16
             // appendBuffer() calls/sec combined) is the current attempt at a smaller
             // latency cost while keeping most of the stability improvement.
-            converter = new VideoConverter(video, msg.fps, /* framesPerFragment= */ 3);
+            converter = new VideoConverter(video, msg.fps, /* framesPerFragment= */ 2);
             converter.play();
             if (msg.audioConfig) {
                 audioAppender = new AudioTrackAppender(

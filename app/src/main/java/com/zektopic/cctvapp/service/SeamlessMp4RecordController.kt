@@ -118,10 +118,13 @@ class SeamlessMp4RecordController(
     @Synchronized
     override fun stopRecord() {
         pendingFile = null
-        val finishedFile = closeCurrentMuxer()
+        val detached = detachCurrentMuxer()
         status = RecordController.Status.STOPPED
         listener?.onStatusChange(status)
-        finishedFile?.let { onSegmentFinalized(it) }
+        if (detached != null) {
+            finishMuxer(detached)
+            detached.file?.let { onSegmentFinalized(it) }
+        }
     }
 
     @Synchronized
@@ -261,7 +264,7 @@ class SeamlessMp4RecordController(
         }
         newMuxer.start()
 
-        val finishedFile = closeCurrentMuxer()
+        val detached = detachCurrentMuxer()
 
         muxer = newMuxer
         muxerFile = file
@@ -270,12 +273,25 @@ class SeamlessMp4RecordController(
         muxerStarted = true
         segmentStartUs = firstSampleTimeUs
 
-        finishedFile?.let { f -> teardownScope.launch { onSegmentFinalized(f) } }
+        // Unlike stopRecord()'s synchronous finish, this runs on the encoder's own callback
+        // thread (via recordVideo()) -- MediaMuxer.stop()'s moov-atom write must not block frame
+        // delivery, so both it and the finalize callback are handed to teardownScope.
+        if (detached != null) {
+            teardownScope.launch {
+                finishMuxer(detached)
+                detached.file?.let { onSegmentFinalized(it) }
+            }
+        }
         return true
     }
 
-    /** Always called from inside an already-@Synchronized method. */
-    private fun closeCurrentMuxer(): File? {
+    /**
+     * Always called from inside an already-@Synchronized method. Detaches the live segment's
+     * [muxer] from the fields other methods use to identify it, without touching the
+     * [MediaMuxer] itself -- [finishMuxer] (its [MediaMuxer.stop] can block on disk I/O for a
+     * moment) is left to the caller, since only [openMuxer]'s caller needs it deferred.
+     */
+    private fun detachCurrentMuxer(): DetachedMuxer? {
         val oldMuxer = muxer ?: return null
         val oldFile = muxerFile
         muxer = null
@@ -283,13 +299,18 @@ class SeamlessMp4RecordController(
         videoTrack = -1
         audioTrack = -1
         muxerStarted = false
+        return DetachedMuxer(oldMuxer, oldFile)
+    }
+
+    private class DetachedMuxer(val muxer: MediaMuxer, val file: File?)
+
+    private fun finishMuxer(detached: DetachedMuxer) {
         try {
-            oldMuxer.stop()
-            oldMuxer.release()
+            detached.muxer.stop()
+            detached.muxer.release()
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to close segment $oldFile", e)
+            Log.e(TAG, "Failed to close segment ${detached.file}", e)
         }
-        return oldFile
     }
 
     private fun writeSample(track: Int, buffer: ByteBuffer, info: MediaCodec.BufferInfo) {
