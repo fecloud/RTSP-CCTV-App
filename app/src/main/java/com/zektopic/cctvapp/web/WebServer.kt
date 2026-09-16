@@ -234,6 +234,18 @@ class WebServer(
             return newFixedLengthResponse(Response.Status.OK, "application/javascript", h264ConverterJs)
         }
 
+        if (uri == "/audio-muxer.js") {
+            return newFixedLengthResponse(Response.Status.OK, "application/javascript", audioMuxerJs)
+        }
+
+        if (uri == "/mse-preview.js") {
+            return newFixedLengthResponse(Response.Status.OK, "application/javascript", msePreviewJs)
+        }
+
+        if (uri == "/dashboard.js") {
+            return newFixedLengthResponse(Response.Status.OK, "application/javascript", dashboardJs)
+        }
+
         if (uri == "/recordings") {
             return newFixedLengthResponse(buildRecordingsHtml(RecordingsStore.listRecordings(context)))
         }
@@ -399,6 +411,9 @@ class WebServer(
     private val dashboardTemplate: String by lazy { loadAsset("web/dashboard.html") }
     private val recordingsTemplate: String by lazy { loadAsset("web/recordings.html") }
     private val h264ConverterJs: String by lazy { loadAsset("web/h264-converter.js") }
+    private val audioMuxerJs: String by lazy { loadAsset("web/audio-muxer.js") }
+    private val msePreviewJs: String by lazy { loadAsset("web/mse-preview.js") }
+    private val dashboardJs: String by lazy { loadAsset("web/dashboard.js") }
 
     private fun loadAsset(path: String): String =
         context.assets.open(path).bufferedReader().use { it.readText() }

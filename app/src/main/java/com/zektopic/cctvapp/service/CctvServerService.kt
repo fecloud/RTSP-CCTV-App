@@ -316,7 +316,7 @@ class CctvServerService : Service(), ConnectChecker {
 
                 val bitrate = settings.bitrateKbps * 1024
 
-                stream.prepareAudio(sampleRate = 44100, isStereo = true, bitrate = 64 * 1024)
+                stream.prepareAudio(sampleRate = 16000, isStereo = false, bitrate = 32 * 1024)
 
                 // Check and set Codec
                 val selectedCodec = when (settings.videoCodec) {

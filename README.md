@@ -79,21 +79,29 @@ NVR can consume, and keeps every frame on your own network.
 ```mermaid
 flowchart LR
     CAM[Camera2 + OpenGL surface] --> ENC[Hardware encoder<br/>H.264 / H.265]
+    MIC[Microphone] --> AENC[AAC encoder]
     ENC --> RTSP[RTSP server<br/>:8554]
-    ENC --> RELAY[Raw H.264 NAL relay<br/>one encode, any number of viewers]
+    AENC --> RTSP
+    ENC --> RELAY[Raw NAL/AAC relay<br/>one encode, any number of viewers]
+    AENC --> RELAY
 
     RELAY --> WS[WebSocket<br/>:8081/ws]
 
     RTSP --> NVR[VLC / OBS / Frigate / NVR]
-    WS --> BROWSER[Browser dashboard<br/>h264-converter.js builds fmp4,<br/>MediaSource / SourceBuffer]
+    WS --> BROWSER[Browser dashboard<br/>h264-converter.js + hand-written audio muxer,<br/>MediaSource / two SourceBuffers]
 ```
 
 Everything runs inside one foreground service. The RTSP stream comes straight off the
-hardware encoder; the dashboard's live preview forwards that same encoder's raw H.264 NALs
-(no server-side muxing) to every connected browser tab over one WebSocket each, sharing one
-camera capture rather than opening it once per viewer. Each tab's own `h264-converter.js`
-(vendored, MSE, video-only -- the same library ws-scrcpy's web client uses) builds the
-fragmented MP4 client-side and feeds a `<video>` via Media Source Extensions.
+hardware encoders; the dashboard's live preview forwards those same encoders' raw H.264 NALs
+and raw AAC frames (no server-side muxing) to every connected browser tab over one WebSocket
+each, sharing one camera/mic capture rather than opening it once per viewer. Each tab builds
+the fragmented MP4 client-side and feeds a `<video>` via Media Source Extensions: video
+through `h264-converter.js` (vendored, the same library ws-scrcpy's web client uses), audio
+through `audio-muxer.js` (no equivalent library exists for that, so it's this project's own
+code -- ported from the fmp4-muxing design this replaced). The self-healing playback logic
+(GOP-based buffer trimming, per-frame stall detection/recovery -- a port of ws-scrcpy's own
+`MsePlayer.ts`/`BasePlayer.ts`) lives in `mse-preview.js`; everything else on the dashboard
+page (zoom, settings, status polling) is `dashboard.js`.
 
 | Component | File |
 |---|---|
@@ -101,6 +109,7 @@ fragmented MP4 client-side and feeds a `<video>` via Media Source Extensions.
 | HTTP server, dashboard and WebSocket route | `WebServer.kt` |
 | Camera pipeline shared by RTSP/recording/MSE | `SharedCameraStream.kt` |
 | Per-viewer MSE broadcast (raw NAL relay) and WebSocket handling | `MseVideoBridge.kt`, `MseStreamSocket.kt` |
+| MSE client: video fmp4 muxing (vendored), audio fmp4 muxing (ours), self-healing playback, dashboard UI | `h264-converter.js`, `audio-muxer.js`, `mse-preview.js`, `dashboard.js` |
 | Authentication, CSRF and HTML escaping | `WebAuth.kt` |
 | Settings | `AppPreferences.kt` |
 
@@ -229,33 +238,40 @@ opens one `/ws` connection; every connection is fed from the same encoder output
 number of tabs can watch at once without a second hardware encode. There's no SDP/ICE
 negotiation: the socket is send-only from the phone's side, so it only works between
 devices that can reach each other directly (this app is LAN-only by design, see "Security"
-above). The preview is video-only (no audio) and requires the H264 codec -- switching to
-H265 closes every connected viewer, since the client can't decode it.
+above). Requires the H264 codec -- switching to H265 closes every connected viewer, since
+the client can't decode it. Audio rides along whenever a microphone is actually present
+(`RECORD_AUDIO` granted); without it the preview just degrades to video-only.
 
-The server does no container work at all; each tab's own `h264-converter.js` (vendored,
-the same library ws-scrcpy's web client uses) builds the fragmented MP4 itself. The wire
-format is one text frame, then binary frames:
+The server does no container work at all; each tab's own client-side code builds the
+fragmented MP4 itself -- video via `h264-converter.js` (vendored, the same library
+ws-scrcpy's web client uses), audio via `audio-muxer.js` (no equivalent library exists, so
+this is this project's own code). Every binary WebSocket frame
+is prefixed with a 1-byte tag so the client can tell the two apart. The wire format is one
+text frame, then binary frames:
 
 ```jsonc
-// Phone -> browser, once on connect -- the stream's frame rate, needed by the client's
-// fmp4 muxer to compute correct sample durations
-{"fps": 30}
+// Phone -> browser, once on connect. sampleRate/channelCount/audioConfig are present only
+// if a microphone is available; audioConfig is the raw 2-byte AAC AudioSpecificConfig
+// (csd-0) as a JSON array of unsigned bytes.
+{"fps": 30, "sampleRate": 44100, "channelCount": 2, "audioConfig": [18, 16]}
 ```
 ```
-// Phone -> browser, binary WebSocket frames, in order:
-//   1. SPS + PPS concatenated (Annex-B, start codes included)
-//   2. one raw Annex-B NAL per subsequent binary frame, straight off the encoder
+// Phone -> browser, binary WebSocket frames -- each prefixed with a 1-byte tag:
+//   tag 0: a raw Annex-B H.264 NAL (start code included), straight off the video encoder.
+//     The first one (sent right after the control message above) is SPS + PPS concatenated.
+//   tag 1: a raw AAC-LC frame (no ADTS header), straight off the audio encoder.
 ```
 
-Every new viewer is gated: NALs are dropped until a real IDR keyframe arrives (the client's
-muxer treats whatever it's given first as the keyframe, whether or not it actually is, so a
-non-IDR NAL first would build a broken init segment). A frame rate or SPS change closes
-every connected `/ws` viewer (a fresh `VideoConverter` only picks up the first SPS/PPS it's
-ever given) -- the dashboard reconnects automatically and starts a new one.
+Every new viewer is gated on video: NALs are dropped until a real IDR keyframe arrives (the
+client's muxer treats whatever it's given first as the keyframe, whether or not it actually
+is, so a non-IDR NAL first would build a broken init segment). Audio frames are never gated
+-- they have no such reference-chain dependency. A frame rate, SPS, or audio format change
+closes every connected `/ws` viewer (a fresh `VideoConverter`/audio muxer only picks up the
+first config it's ever given) -- the dashboard reconnects automatically and starts new ones.
 
 If the camera isn't currently streaming, the server closes the socket immediately
 (`GoingAway`) rather than accepting an offer it has nothing to answer with -- see
-`app/src/main/assets/web/dashboard.html`'s client script, which just reconnects on a timer.
+`app/src/main/assets/web/mse-preview.js`, which just reconnects on a timer.
 
 <details>
 <summary><b>Keys accepted by <code>/action/set-setting</code></b></summary>
