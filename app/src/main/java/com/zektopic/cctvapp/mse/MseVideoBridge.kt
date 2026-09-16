@@ -207,14 +207,19 @@ private fun bufferToArray(buffer: ByteBuffer, info: MediaCodec.BufferInfo): Byte
  * why this suspects RootEncoder doesn't always emit a 4-byte one. Always re-prefixing with a
  * canonical 4-byte start code, regardless of what the encoder gave us, keeps the client's parser
  * in sync either way.
+ *
+ * Called on every video NAL on the shared camera callback thread while any viewer is attached,
+ * so the already-4-byte-prefixed case (the common one) returns [nal] itself with zero copying --
+ * only a 3-byte or missing prefix pays for the copy-and-reprefix below.
  */
 private fun normalizeStartCode(nal: ByteArray): ByteArray {
-    val payload = when {
-        nal.size >= 4 && nal[0] == 0.toByte() && nal[1] == 0.toByte() && nal[2] == 0.toByte() && nal[3] == 1.toByte() ->
-            nal.copyOfRange(4, nal.size)
-        nal.size >= 3 && nal[0] == 0.toByte() && nal[1] == 0.toByte() && nal[2] == 1.toByte() ->
-            nal.copyOfRange(3, nal.size)
-        else -> nal
+    if (nal.size >= 4 && nal[0] == 0.toByte() && nal[1] == 0.toByte() && nal[2] == 0.toByte() && nal[3] == 1.toByte()) {
+        return nal
+    }
+    val payload = if (nal.size >= 3 && nal[0] == 0.toByte() && nal[1] == 0.toByte() && nal[2] == 1.toByte()) {
+        nal.copyOfRange(3, nal.size)
+    } else {
+        nal
     }
     val result = ByteArray(4 + payload.size)
     result[3] = 1

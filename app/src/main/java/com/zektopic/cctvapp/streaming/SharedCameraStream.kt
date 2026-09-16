@@ -82,9 +82,9 @@ class SharedCameraStream(
             // internal clone-before-enqueue, MediaMuxer's offset-based reads, and our own
             // duplicate()-based copy below) reads independently without mutating shared
             // position/limit state, an already-proven-safe pattern in the code this mirrors.
-            recordController.recordVideo(videoBuffer, info)
             rtspServer.sendVideo(videoBuffer, info)
             extraVideoListeners.forEach { it.getVideoData(videoBuffer, info) }
+            recordController.recordVideo(videoBuffer, info)
         }
 
         override fun onVideoFormat(mediaFormat: MediaFormat) {
@@ -94,9 +94,9 @@ class SharedCameraStream(
 
     private val getAacData = object : GetAudioData {
         override fun getAudioData(audioBuffer: ByteBuffer, info: MediaCodec.BufferInfo) {
-            recordController.recordAudio(audioBuffer, info)
             rtspServer.sendAudio(audioBuffer, info)
             extraAudioListeners.forEach { it.getAudioData(audioBuffer, info) }
+            recordController.recordAudio(audioBuffer, info)
         }
 
         override fun onAudioFormat(mediaFormat: MediaFormat) {

@@ -6,6 +6,9 @@ import fi.iki.elonen.NanoWSD
 import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.util.concurrent.ArrayBlockingQueue
+import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledFuture
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import org.json.JSONArray
 import org.json.JSONObject
@@ -41,10 +44,21 @@ class MseStreamSocket(
 
         private const val TAG_VIDEO: Byte = 0
         private const val TAG_AUDIO: Byte = 1
+
+        /**
+         * Shared by every connected viewer -- a keepalive tick is a cheap periodic check (a ping
+         * plus a boolean read), not worth a dedicated sleeping OS thread per connection the way
+         * [startSender]'s long-lived blocking send loop is. Small fixed pool since a slow/dead
+         * viewer's ping can still block briefly; one stuck viewer shouldn't stall everyone else's
+         * ticks indefinitely.
+         */
+        private val keepAliveExecutor = Executors.newScheduledThreadPool(2) { r ->
+            Thread(r, "MseStreamSocket-KeepAlive").apply { isDaemon = true }
+        }
     }
 
     @Volatile private var bridge: MseVideoBridge? = null
-    @Volatile private var keepAliveThread: Thread? = null
+    @Volatile private var keepAliveTask: ScheduledFuture<*>? = null
     @Volatile private var senderThread: Thread? = null
     private val senderRunning = AtomicBoolean(false)
     private val pending = ArrayBlockingQueue<ByteArray>(PENDING_QUEUE_CAPACITY)
@@ -163,35 +177,32 @@ class MseStreamSocket(
     }
 
     private fun startKeepAlive() {
-        keepAliveThread = Thread({
-            try {
-                while (isOpen) {
-                    Thread.sleep(KEEPALIVE_INTERVAL_MS)
-                    if (!isOpen) break
+        keepAliveTask = keepAliveExecutor.scheduleWithFixedDelay({
+            if (isOpen) {
+                try {
                     if (needsKeyframeRequest) {
                         needsKeyframeRequest = false
                         bridge?.requestKeyframe()
                     }
                     ping(ByteArray(0))
+                } catch (e: IOException) {
+                    // Dead connection the read loop hasn't noticed yet -- close now instead of
+                    // waiting out NanoHTTPD's read timeout.
+                    Log.w(TAG, "Keepalive ping failed, closing viewer socket", e)
+                    closeQuietly("Keepalive failed", NanoWSD.WebSocketFrame.CloseCode.AbnormalClosure)
                 }
-            } catch (e: InterruptedException) {
-                // Normal shutdown, see onClose().
-            } catch (e: IOException) {
-                // Dead connection the read loop hasn't noticed yet -- close now instead of
-                // waiting out NanoHTTPD's read timeout.
-                Log.w(TAG, "Keepalive ping failed, closing viewer socket", e)
-                closeQuietly("Keepalive failed", NanoWSD.WebSocketFrame.CloseCode.AbnormalClosure)
             }
-        }, "MseStreamSocket-KeepAlive").apply {
-            isDaemon = true
-            start()
-        }
+        }, KEEPALIVE_INTERVAL_MS, KEEPALIVE_INTERVAL_MS, TimeUnit.MILLISECONDS)
+    }
+
+    private fun stopKeepAlive() {
+        keepAliveTask?.cancel(false)
+        keepAliveTask = null
     }
 
     override fun onClose(code: NanoWSD.WebSocketFrame.CloseCode?, reason: String?, initiatedByRemote: Boolean) {
         if (!closed.compareAndSet(false, true)) return
-        keepAliveThread?.interrupt()
-        keepAliveThread = null
+        stopKeepAlive()
         stopSender()
         bridge?.detach(this)
         bridge = null
