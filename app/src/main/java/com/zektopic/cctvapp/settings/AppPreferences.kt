@@ -248,9 +248,9 @@ object AppPreferences {
      * usage drops back under it -- otherwise a server left running would fill the
      * device's storage with 5-minute clips indefinitely.
      */
-    const val RECORD_STORAGE_THRESHOLD_PERCENT_MIN = 50
-    const val RECORD_STORAGE_THRESHOLD_PERCENT_MAX = 95
-    const val DEFAULT_RECORD_STORAGE_THRESHOLD_PERCENT = 90
+    const val RECORD_STORAGE_THRESHOLD_PERCENT_MIN = 10
+    const val RECORD_STORAGE_THRESHOLD_PERCENT_MAX = 90
+    const val DEFAULT_RECORD_STORAGE_THRESHOLD_PERCENT = 50
 
     /** Off by default: recording to the gallery uses storage the user should opt into. */
     fun getRecordToGalleryEnabled(context: Context): Boolean =

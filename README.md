@@ -290,7 +290,7 @@ If the camera isn't currently streaming, the server closes the socket immediatel
 | `web_auth_enabled` | bool | Require authentication on port 8081 |
 | `record_to_gallery_enabled` | bool | Record rotating segments to the app's private storage, browsable via `/recordings` |
 | `record_segment_minutes` | int 1–60 | Length of each recorded segment |
-| `record_storage_threshold_percent` | int 50–95 | Local storage usage above which the oldest recorded segments are deleted |
+| `record_storage_threshold_percent` | int 10–90 | Local storage usage above which the oldest recorded segments are deleted |
 
 </details>
 
