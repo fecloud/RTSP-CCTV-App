@@ -17,7 +17,7 @@ import androidx.core.content.ContextCompat
 import com.zektopic.cctvapp.log.AppLog as Log
 import com.pedro.common.ConnectChecker
 import com.pedro.common.VideoCodec
-import com.pedro.encoder.input.gl.render.filters.`object`.TextObjectFilterRender
+import com.pedro.encoder.input.gl.render.filters.`object`.TextFilterRender
 import com.pedro.encoder.input.sources.audio.MicrophoneSource
 import com.pedro.encoder.input.sources.audio.NoAudioSource
 import com.pedro.encoder.input.sources.video.Camera2Source
@@ -81,7 +81,7 @@ class CctvServerService : Service(), ConnectChecker {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var sensorManager: SensorManager? = null
     private var lightSensor: Sensor? = null
-    private var textFilter: TextObjectFilterRender? = null
+    private var textFilter: TextFilterRender? = null
 
     /** Ticks [updateTimestampText] every second while the timestamp overlay is enabled. */
     private var timestampJob: Job? = null
@@ -388,7 +388,7 @@ class CctvServerService : Service(), ConnectChecker {
         }
 
         try {
-            val filter = TextObjectFilterRender()
+            val filter = TextFilterRender()
             sharedStream?.getGlInterface()?.setFilter(filter)
 
             val fontSize = getOverlayFontSize()

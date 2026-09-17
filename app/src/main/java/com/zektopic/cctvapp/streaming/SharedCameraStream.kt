@@ -211,25 +211,20 @@ class SharedCameraStream(
         audioEncoder.forceCodecType(codecTypeAudio)
     }
 
-    /** [codec] is only ever [VideoCodec.H264]/[VideoCodec.H265] -- see `CctvServerService.startStream`; AV1 is never offered. */
+    /** [codec] is only ever [VideoCodec.H264]/[VideoCodec.H265] -- see `CctvServerService.startStream`; AV1/VP8/VP9 are never offered. */
     fun setVideoCodec(codec: VideoCodec) {
         rtspServer.setVideoCodec(codec)
         recordController.setVideoCodec(codec)
         videoEncoder.type = when (codec) {
-            VideoCodec.H264 -> CodecUtil.H264_MIME
-            VideoCodec.H265 -> CodecUtil.H265_MIME
-            VideoCodec.AV1 -> error("AV1 is not a supported codec in this app")
+            VideoCodec.H264, VideoCodec.H265 -> codec
+            else -> error("${codec.name} is not a supported codec in this app")
         }
     }
 
     fun setAudioCodec(codec: AudioCodec) {
         rtspServer.setAudioCodec(codec)
         recordController.setAudioCodec(codec)
-        audioEncoder.type = when (codec) {
-            AudioCodec.G711 -> CodecUtil.G711_MIME
-            AudioCodec.AAC -> CodecUtil.AAC_MIME
-            AudioCodec.OPUS -> CodecUtil.OPUS_MIME
-        }
+        audioEncoder.type = codec
     }
 
     /** Replaces `getStreamClient().setAuthorization(user, password)` -- `RtspServer` (unlike `RtspServerStream`) exposes this directly. */
