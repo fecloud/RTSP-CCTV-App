@@ -136,8 +136,14 @@ possible.
 
 - `packaging { jniLibs { useLegacyPackaging = true } }` in `app/build.gradle.kts` works
   around third-party native libs not yet 16KB-page-aligned.
-- `isMinifyEnabled = false` for release builds is deliberate: RootEncoder resolves classes
-  reflectively, and R8 needs a full on-device verification pass first.
+- Release builds run R8 (`isMinifyEnabled = true`). Neither RootEncoder/RTSP-Server nor the
+  app's own code use reflection (verified against their sources, not just assumed), so the
+  only hand-written keep rules needed are Bugly's official ones in `app/proguard-rules.pro`
+  — AndroidX/view-binding-generated classes are covered by consumer rules bundled in those
+  AARs. If a future dependency needs its own rules, verify on a real device (`assembleRelease`
+  + install + exercise RTSP/dashboard/recording) rather than assuming R8's build-time
+  warnings caught everything — a missing keep rule strips silently at build time and only
+  surfaces as a runtime crash.
 - `rootEncoder` and `rtspServer` versions in `libs.versions.toml` must be bumped together
   — `RTSP-Server` pins a `RootEncoder` version transitively.
 - `agp` in `libs.versions.toml` is pinned to `9.3.2` to match the AGP version RootEncoder/

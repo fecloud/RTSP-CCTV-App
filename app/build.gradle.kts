@@ -77,6 +77,10 @@ android {
         buildConfigField("String", "BUILD_TIME", "\"$buildTimestamp\"")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        ndk {
+            abiFilters += listOf("armeabi-v7a", "arm64-v8a")
+        }
     }
 
     signingConfigs {
@@ -105,10 +109,8 @@ android {
             }
         }
         release {
-            // Kept off deliberately: RootEncoder resolves classes reflectively, and a
-            // mis-shrunk release only fails at runtime. Enabling R8 needs a full
-            // on-device pass first -- see README roadmap.
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

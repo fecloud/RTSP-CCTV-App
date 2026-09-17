@@ -19,3 +19,11 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+
+# Bugly needs line numbers to de-obfuscate crash stacks against the uploaded mapping.txt.
+-keepattributes SourceFile,LineNumberTable
+
+# Official Bugly proguard rule (https://bugly.qq.com) -- the SDK ships no consumer rules
+# of its own, so this must live here.
+-dontwarn com.tencent.bugly.**
+-keep public class com.tencent.bugly.**{*;}

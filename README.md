@@ -405,8 +405,7 @@ Samsung) still kill the camera in the background regardless; on Xiaomi also enab
 ## Roadmap
 
 - [ ] HTTPS/TLS for the dashboard, so credentials are not sent in plaintext
-- [ ] Enable R8 for release builds (needs keep rules for the reflection-heavy
-      RootEncoder dependency, plus an on-device verification pass)
+- [x] Enable R8 for release builds
 - [ ] ONVIF discovery so NVRs can find the camera automatically
 - [ ] Continuous recording with a rolling buffer
 - [ ] Multi-camera management from one dashboard
