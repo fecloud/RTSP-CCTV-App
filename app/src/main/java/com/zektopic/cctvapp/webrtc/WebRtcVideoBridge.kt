@@ -1,8 +1,6 @@
 package com.zektopic.cctvapp.webrtc
 
 import android.content.Context
-import android.graphics.ImageFormat
-import android.media.ImageReader
 import android.view.Surface
 import com.pedro.library.view.preview.MultiPreviewConfig
 import com.pedro.rtspserver.RtspServerStream
@@ -78,13 +76,28 @@ class WebRtcVideoBridge(appContext: Context) {
      * never actually delivers a frame to a headless (non-display) `Surface` -- confirmed
      * on-device: attaching a WebRTC `SurfaceTextureHelper`-backed `Surface` there produces
      * zero frames despite every setup step succeeding without error, while the exact same
-     * kind of `Surface` DOES receive frames via `addPreviewSurface`'s multi-preview path
-     * (verified with a diagnostic `ImageReader`). `startPreview()` still has to be called
-     * once (on some surface) to flip `isOnPreview` true -- `addPreviewSurface` throws
-     * otherwise -- so this tiny 1x1 `ImageReader` exists purely to satisfy that
-     * precondition; its actual image content is drained and discarded.
+     * kind of `Surface` DOES receive frames via `addPreviewSurface`'s multi-preview path.
+     * `startPreview()` still has to be called once (on some surface) to flip `isOnPreview`
+     * true -- `addPreviewSurface` throws otherwise -- so this tiny 1x1 sink exists purely to
+     * satisfy that precondition.
+     *
+     * An `ImageReader`-backed sink used to fill this role, but it logged a continuous
+     * `ImageReader_JNI: Acquire image failed with error: Unknown error -2` flood, one per
+     * frame, for as long as the stream ran (confirmed on-device via logcat) -- `ImageReader`
+     * defaults to CPU-readable usage, which conflicts with the opaque/GPU-only buffers
+     * RootEncoder's GL renderer actually writes here, so every `acquireLatestImage()` failed
+     * at the native layer even though the precondition-flipping itself worked. A
+     * `SurfaceTexture`-backed sink (via its own dedicated `SurfaceTextureHelper`) matches the
+     * GPU-only usage the producer expects, so frames drain cleanly with no log spam. The
+     * listener below must NOT call `frame.release()` itself --
+     * `SurfaceTextureHelper.tryDeliverTextureFrame` already releases the frame once the
+     * listener returns (a listener only needs `frame.retain()` if it wants to keep the frame
+     * past that point); calling `release()` again here double-releases it and crashes with
+     * `IllegalStateException: release() called on an object with refcount < 1` (confirmed
+     * on-device).
      */
-    private var dummyPrimaryPreviewReader: ImageReader? = null
+    private var dummyPreviewHelper: SurfaceTextureHelper? = null
+    private var dummyPreviewSurface: Surface? = null
 
     fun factory(): PeerConnectionFactory = peerConnectionFactory
 
@@ -103,7 +116,7 @@ class WebRtcVideoBridge(appContext: Context) {
      * including on a settings-triggered restart.
      *
      * Taps the camera feed via `addPreviewSurface`'s multi-preview mechanism (see
-     * [dummyPrimaryPreviewReader]'s kdoc for why not the primary preview slot).
+     * [dummyPreviewHelper]'s kdoc for why not the primary preview slot).
      * [SurfaceTextureHelper.startListening] delivers each frame back as a ready-made
      * [org.webrtc.VideoFrame], handed straight to [VideoSource.getCapturerObserver] -- no
      * manual texture-to-frame conversion needed.
@@ -121,16 +134,14 @@ class WebRtcVideoBridge(appContext: Context) {
 
         try {
             if (!stream.isOnPreview) {
-                // PRIVATE, not YUV_420_888: RootEncoder's GL rendering produces opaque/RGBA
-                // buffers here, not YUV -- acquireLatestImage() throws
-                // UnsupportedOperationException on a format mismatch otherwise (confirmed
-                // on-device). PRIVATE doesn't validate against a specific pixel format, which
-                // is exactly right for a sink whose content is never actually read.
-                val dummy = dummyPrimaryPreviewReader ?: ImageReader.newInstance(1, 1, ImageFormat.PRIVATE, 2).also {
-                    it.setOnImageAvailableListener({ reader -> reader.acquireLatestImage()?.close() }, null)
-                    dummyPrimaryPreviewReader = it
-                }
-                stream.startPreview(dummy.surface, 1, 1)
+                val helper = dummyPreviewHelper
+                    ?: SurfaceTextureHelper.create("WebRtcDummyPrimaryPreview", eglBase.eglBaseContext).also {
+                        it.setTextureSize(1, 1)
+                        it.startListening {}
+                        dummyPreviewHelper = it
+                    }
+                val dummySurface = dummyPreviewSurface ?: Surface(helper.surfaceTexture).also { dummyPreviewSurface = it }
+                stream.startPreview(dummySurface, 1, 1)
             }
             if (!stream.hasMultiPreviewSurface(surface)) {
                 stream.addPreviewSurface(surface, MultiPreviewConfig(width = width, height = height))
@@ -187,8 +198,11 @@ class WebRtcVideoBridge(appContext: Context) {
         runCatching { peerConnectionFactory.dispose() }
         runCatching { audioDeviceModule.release() }
         runCatching { eglBase.release() }
-        runCatching { dummyPrimaryPreviewReader?.close() }
-        dummyPrimaryPreviewReader = null
+        runCatching { dummyPreviewHelper?.stopListening() }
+        runCatching { dummyPreviewHelper?.dispose() }
+        runCatching { dummyPreviewSurface?.release() }
+        dummyPreviewHelper = null
+        dummyPreviewSurface = null
         previewSurface = null
     }
 }
