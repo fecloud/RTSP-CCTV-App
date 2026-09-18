@@ -357,4 +357,6 @@ function startMsePreview() {
     };
     ws.onerror = () => { log('ws-error'); ws.close(); };
 }
-startMsePreview();
+if (typeof CCTV_PREVIEW_TYPE === 'undefined' || CCTV_PREVIEW_TYPE !== 'webrtc') {
+    startMsePreview();
+}

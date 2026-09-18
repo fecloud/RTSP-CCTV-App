@@ -163,6 +163,28 @@ function fetchStatus() {
         })
         .catch(function() {});
 }
+// --- Preview transport toggle ---
+// The choice is stuck in localStorage (per browser, not per device -- see dashboard.html's
+// CCTV_PREVIEW_TYPE bootstrap) and applied by reloading, rather than tearing down/handing off
+// in-place -- mse-preview.js/webrtc-preview.js each own their own connect/reconnect lifecycle
+// and neither exposes a teardown hook the other could call.
+function togglePreviewType() {
+    const isWebRtc = typeof CCTV_PREVIEW_TYPE !== 'undefined' && CCTV_PREVIEW_TYPE === 'webrtc';
+    localStorage.setItem('cctv-preview-type', isWebRtc ? 'mse' : 'webrtc');
+    location.reload();
+}
+(function initPreviewTypeChip() {
+    const chip = document.getElementById('chipPreviewType');
+    if (!chip) return;
+    const isWebRtc = typeof CCTV_PREVIEW_TYPE !== 'undefined' && CCTV_PREVIEW_TYPE === 'webrtc';
+    // Shows what tapping it switches TO, not the current mode -- a call-to-action label,
+    // not a status readout (chipCodec/chipRes already cover "what's active right now").
+    const target = isWebRtc ? 'MSE' : 'RTC';
+    chip.textContent = target;
+    chip.title = 'Tap to switch to ' + target;
+    chip.onclick = togglePreviewType;
+})();
+
 fetchStatus();
 setInterval(fetchStatus, 3000);
 

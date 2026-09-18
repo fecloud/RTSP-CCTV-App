@@ -20,9 +20,9 @@ class CctvApplication : Application() {
      * service's own `onCreate`/`onDestroy`, so stopping the service killed the dashboard
      * along with it. Every cross-cutting concern (settings, start/stop/switch-camera
      * commands, zoom range) goes through [ServiceStateRepository], which `WebServer`
-     * already reads/writes directly; the live camera/mic tap for the MSE preview goes through
-     * `MseBus` instead (see `MseStreamSocket`'s kdoc), for the same reason `CameraRuntimeBus`
-     * used to exist for the old JPEG snapshot feed. `WebServer` reads
+     * already reads/writes directly; the live camera/mic tap for the MSE/WebRTC previews goes
+     * through `PreviewBus` instead (see `MseStreamSocket`'s kdoc), for the same reason
+     * `CameraRuntimeBus` used to exist for the old JPEG snapshot feed. `WebServer` reads
      * its own IP address live off [com.zektopic.cctvapp.device.DeviceStatsUtil] on every
      * request rather than taking one here, since it can change at any point over this
      * long-lived server's lifetime.

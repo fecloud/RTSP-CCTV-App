@@ -411,6 +411,7 @@
                      unmute via native controls' own icon whenever they want sound. -->
                 <video id="cam-preview" autoplay muted playsinline controls></video>
                 <div class="preview-overlay">
+                    <span class="chip" id="chipPreviewType" style="cursor:pointer;"></span>
                     <span class="chip" id="chipRec" style="display:none;color:var(--danger);">● REC</span>
                     <span class="chip" id="chipCodec">—</span>
                     <span class="chip" id="chipRes">—</span>
@@ -622,9 +623,17 @@
     
     <div class="toast" id="toast"></div>
 
+    <script>
+        // Sticky per-browser choice (see dashboard.js's preview-type chip) between the WebRTC
+        // pipeline (webrtc-preview.js) and the default MSE one (mse-preview.js) -- both scripts
+        // load either way (they're just declarations with no side effects until their
+        // start*Preview() runs) so there's no server-side branching needed for which one runs.
+        var CCTV_PREVIEW_TYPE = localStorage.getItem('cctv-preview-type') === 'webrtc' ? 'webrtc' : 'mse';
+    </script>
     <script src="/h264-converter.js"></script>
     <script src="/audio-muxer.js"></script>
     <script src="/mse-preview.js"></script>
+    <script src="/webrtc-preview.js"></script>
     <script src="/dashboard.js"></script>
 </body>
 </html>

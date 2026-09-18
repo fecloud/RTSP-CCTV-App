@@ -1,15 +1,20 @@
 package com.zektopic.cctvapp.mse
 
 import com.zektopic.cctvapp.log.AppLog as Log
+import com.zektopic.cctvapp.service.PreviewBus
 import fi.iki.elonen.NanoHTTPD.IHTTPSession
 import fi.iki.elonen.NanoWSD
 import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.util.concurrent.ArrayBlockingQueue
-import java.util.concurrent.Executors
-import java.util.concurrent.ScheduledFuture
-import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -48,17 +53,16 @@ class MseStreamSocket(
         /**
          * Shared by every connected viewer -- a keepalive tick is a cheap periodic check (a ping
          * plus a boolean read), not worth a dedicated sleeping OS thread per connection the way
-         * [startSender]'s long-lived blocking send loop is. Small fixed pool since a slow/dead
-         * viewer's ping can still block briefly; one stuck viewer shouldn't stall everyone else's
-         * ticks indefinitely.
+         * [startSender]'s long-lived blocking send loop is. [Dispatchers.IO] rather than a small
+         * fixed pool: a slow/dead viewer's blocking [ping] call only ties up one of its elastic
+         * worker threads, so one stuck viewer doesn't stall everyone else's ticks the way it
+         * could on a hard-capped pool.
          */
-        private val keepAliveExecutor = Executors.newScheduledThreadPool(2) { r ->
-            Thread(r, "MseStreamSocket-KeepAlive").apply { isDaemon = true }
-        }
+        private val keepAliveScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     }
 
     @Volatile private var bridge: MseVideoBridge? = null
-    @Volatile private var keepAliveTask: ScheduledFuture<*>? = null
+    @Volatile private var keepAliveJob: Job? = null
     @Volatile private var senderThread: Thread? = null
     private val senderRunning = AtomicBoolean(false)
     private val pending = ArrayBlockingQueue<ByteArray>(PENDING_QUEUE_CAPACITY)
@@ -80,7 +84,7 @@ class MseStreamSocket(
             closeQuietly("Unauthorized", NanoWSD.WebSocketFrame.CloseCode.PolicyViolation)
             return
         }
-        val activeBridge = MseBus.bridge.get()
+        val activeBridge = PreviewBus.mseBridge.get()
         val handshake = activeBridge?.snapshotForNewViewer()
         if (activeBridge == null || handshake == null) {
             closeQuietly("Camera not streaming", NanoWSD.WebSocketFrame.CloseCode.GoingAway)
@@ -177,8 +181,10 @@ class MseStreamSocket(
     }
 
     private fun startKeepAlive() {
-        keepAliveTask = keepAliveExecutor.scheduleWithFixedDelay({
-            if (isOpen) {
+        keepAliveJob = keepAliveScope.launch {
+            while (isActive) {
+                delay(KEEPALIVE_INTERVAL_MS)
+                if (!isOpen) continue
                 try {
                     if (needsKeyframeRequest) {
                         needsKeyframeRequest = false
@@ -192,12 +198,12 @@ class MseStreamSocket(
                     closeQuietly("Keepalive failed", NanoWSD.WebSocketFrame.CloseCode.AbnormalClosure)
                 }
             }
-        }, KEEPALIVE_INTERVAL_MS, KEEPALIVE_INTERVAL_MS, TimeUnit.MILLISECONDS)
+        }
     }
 
     private fun stopKeepAlive() {
-        keepAliveTask?.cancel(false)
-        keepAliveTask = null
+        keepAliveJob?.cancel()
+        keepAliveJob = null
     }
 
     override fun onClose(code: NanoWSD.WebSocketFrame.CloseCode?, reason: String?, initiatedByRemote: Boolean) {

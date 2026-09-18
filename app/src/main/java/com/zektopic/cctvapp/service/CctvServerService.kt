@@ -27,9 +27,9 @@ import com.zektopic.cctvapp.device.DeviceStatsUtil
 import com.zektopic.cctvapp.settings.ServiceRuntimeState
 import com.zektopic.cctvapp.settings.ServiceSettings
 import com.zektopic.cctvapp.settings.ServiceStateRepository
-import com.zektopic.cctvapp.mse.MseBus
 import com.zektopic.cctvapp.mse.MseVideoBridge
 import com.zektopic.cctvapp.streaming.SharedCameraStream
+import com.zektopic.cctvapp.webrtc.WebRtcPreviewBridge
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -55,7 +55,7 @@ class CctvServerService : Service(), ConnectChecker {
 
     /**
      * Null until the first successful [startStream] -- created there, never recreated, and
-     * torn down only in [onDestroy]. Published through [MseBus] so `WebServer`'s
+     * torn down only in [onDestroy]. Published through [PreviewBus] so `WebServer`'s
      * WebSocket handler (a different package, owned by `CctvApplication` rather than this
      * service) can reach it.
      */
@@ -63,7 +63,19 @@ class CctvServerService : Service(), ConnectChecker {
 
     private fun ensureMseBridge(): MseVideoBridge = mseBridge ?: MseVideoBridge().also {
         mseBridge = it
-        MseBus.bridge.set(it)
+        PreviewBus.mseBridge.set(it)
+    }
+
+    /**
+     * Null until the first successful [startStream] -- created there, never recreated, and
+     * torn down only in [onDestroy]. Published through [PreviewBus] the same way [mseBridge] is,
+     * for the dashboard's WebRTC preview.
+     */
+    private var webRtcBridge: WebRtcPreviewBridge? = null
+
+    private fun ensureWebRtcBridge(): WebRtcPreviewBridge = webRtcBridge ?: WebRtcPreviewBridge(this).also {
+        webRtcBridge = it
+        PreviewBus.webRtcBridge.set(it)
     }
 
     /** True only once the camera exists and is actively streaming. */
@@ -371,6 +383,10 @@ class CctvServerService : Service(), ConnectChecker {
                     } else {
                         mseBridge?.onUnsupportedCodec()
                     }
+                    // Unlike the MSE bridge, WebRTC taps the camera's raw GL composite (see
+                    // WebRtcPreviewBridge's kdoc) rather than the encoded bitstream, so it
+                    // works regardless of which codec RTSP is using.
+                    ensureWebRtcBridge().onStreamStarted(stream)
                 } else {
                     Log.e(TAG, "H264 fallback preparation also failed.")
                 }
@@ -579,7 +595,10 @@ class CctvServerService : Service(), ConnectChecker {
         }
         mseBridge?.release()
         mseBridge = null
-        MseBus.bridge.set(null)
+        PreviewBus.mseBridge.set(null)
+        webRtcBridge?.release()
+        webRtcBridge = null
+        PreviewBus.webRtcBridge.set(null)
         ServiceStateRepository.updateRuntime { it.copy(isStreaming = false) }
 
         // STOP_FOREGROUND_REMOVE needs API 24; the boolean overload covers API 23 too.
