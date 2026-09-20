@@ -57,6 +57,9 @@ val gitCommitHash: String = runCatching {
  */
 val buildTimestamp: String = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US).format(Date())
 
+/** Filename-safe counterpart of [buildTimestamp], used to rename the release APK below. */
+val apkTimestamp: String = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
+
 android {
     namespace = "com.zektopic.cctvapp"
     compileSdk {
@@ -139,6 +142,16 @@ android {
     packaging {
         jniLibs {
             useLegacyPackaging = true
+        }
+    }
+}
+
+// Renames the release APK from the default app-release.apk to something that identifies
+// the exact build (commit + local build time) without cross-referencing CI history.
+androidComponents {
+    onVariants(selector().withBuildType("release")) { variant ->
+        variant.outputs.forEach { output ->
+            output.outputFileName.set("cctv-git-$gitCommitHash-$apkTimestamp.apk")
         }
     }
 }
