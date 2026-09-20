@@ -68,6 +68,17 @@ class SharedCameraStream(
     /** Same purpose as [extraVideoListeners], for the audio side. */
     private val extraAudioListeners = CopyOnWriteArrayList<GetAudioData>()
 
+    /**
+     * Raw-PCM equivalent of [extraAudioListeners] -- registered listeners see every mic [Frame]
+     * before AAC encoding, not RootEncoder's encoded bitstream.
+     * [com.zektopic.cctvapp.audio.AudioStreamBridge] uses this to relay live audio to dashboard
+     * viewers by scheduling raw PCM directly via the Web Audio API, client-side -- AAC was tried
+     * first and reverted: decode-free direct scheduling is what keeps playback latency from
+     * accumulating (see AudioStreamBridge.kt's kdoc), which neither MediaSource/SourceBuffer nor
+     * the WebCodecs `AudioDecoder` API gave for free.
+     */
+    private val extraPcmListeners = CopyOnWriteArrayList<GetMicrophoneData>()
+
     private var recordController: RecordController = AndroidMuxerRecordController()
 
     private val getVideoData = object : GetVideoData {
@@ -108,6 +119,7 @@ class SharedCameraStream(
     private val getMicrophoneData = object : GetMicrophoneData {
         override fun inputPCMData(frame: Frame) {
             audioEncoder.inputPCMData(frame)
+            extraPcmListeners.forEach { it.inputPCMData(frame) }
         }
     }
 
@@ -275,6 +287,15 @@ class SharedCameraStream(
 
     fun removeAudioDataListener(listener: GetAudioData) {
         extraAudioListeners.remove(listener)
+    }
+
+    /** Same purpose as [addAudioDataListener], but pre-encode raw PCM -- see [extraPcmListeners]. */
+    fun addPcmDataListener(listener: GetMicrophoneData) {
+        extraPcmListeners.add(listener)
+    }
+
+    fun removePcmDataListener(listener: GetMicrophoneData) {
+        extraPcmListeners.remove(listener)
     }
 
     /** Only called from the service's `onDestroy()`. */

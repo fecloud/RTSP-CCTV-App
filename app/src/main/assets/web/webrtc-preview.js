@@ -1,9 +1,12 @@
 // --- WebRTC live preview (opt-in via the dashboard's preview-type chip, see dashboard.js) ---
 // Signaling over /webrtc-ws (see WebRtcSignalingSocket.kt): this side always initiates with an
-// SDP offer built from two recvonly transceivers (video+audio), the phone answers with its
-// shared camera/mic tracks, and ICE candidates are relayed both ways as small JSON messages.
-// No STUN/TURN server is configured -- this dashboard only ever talks to the phone over the
-// LAN, so a host ICE candidate is always enough (see WebRtcPreviewBridge.kt).
+// SDP offer built from a recvonly video transceiver, the phone answers with its shared camera
+// track, and ICE candidates are relayed both ways as small JSON messages. No STUN/TURN server is
+// configured -- this dashboard only ever talks to the phone over the LAN, so a host ICE candidate
+// is always enough (see WebRtcPreviewBridge.kt).
+//
+// Video-only: audio is a separate, shared preview independent of which video transport is active
+// -- see audio-preview.js and AudioStreamBridge.kt's kdoc for why.
 const WEBRTC_PREVIEW = {
     RECONNECT_DELAY_MS: 2000,
 };
@@ -14,7 +17,6 @@ function startWebRtcPreview() {
 
     const pc = new RTCPeerConnection({ iceServers: [] });
     pc.addTransceiver('video', { direction: 'recvonly' });
-    pc.addTransceiver('audio', { direction: 'recvonly' });
     pc.ontrack = (event) => {
         if (video.srcObject !== event.streams[0]) video.srcObject = event.streams[0];
     };

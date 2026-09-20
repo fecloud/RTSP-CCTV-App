@@ -27,6 +27,7 @@ import com.zektopic.cctvapp.device.DeviceStatsUtil
 import com.zektopic.cctvapp.settings.ServiceRuntimeState
 import com.zektopic.cctvapp.settings.ServiceSettings
 import com.zektopic.cctvapp.settings.ServiceStateRepository
+import com.zektopic.cctvapp.audio.AudioStreamBridge
 import com.zektopic.cctvapp.mse.MseVideoBridge
 import com.zektopic.cctvapp.streaming.SharedCameraStream
 import com.zektopic.cctvapp.webrtc.WebRtcPreviewBridge
@@ -76,6 +77,19 @@ class CctvServerService : Service(), ConnectChecker {
     private fun ensureWebRtcBridge(): WebRtcPreviewBridge = webRtcBridge ?: WebRtcPreviewBridge(this).also {
         webRtcBridge = it
         PreviewBus.webRtcBridge.set(it)
+    }
+
+    /**
+     * Null until the first successful [startStream] -- created there, never recreated, and
+     * torn down only in [onDestroy]. Published through [PreviewBus] the same way [mseBridge] is,
+     * for the dashboard's shared audio preview -- independent of [mseBridge]/[webRtcBridge]
+     * since audio doesn't care which video transport is active (see `AudioStreamBridge`'s kdoc).
+     */
+    private var audioBridge: AudioStreamBridge? = null
+
+    private fun ensureAudioBridge(): AudioStreamBridge = audioBridge ?: AudioStreamBridge().also {
+        audioBridge = it
+        PreviewBus.audioBridge.set(it)
     }
 
     /** True only once the camera exists and is actively streaming. */
@@ -387,6 +401,9 @@ class CctvServerService : Service(), ConnectChecker {
                     // WebRtcPreviewBridge's kdoc) rather than the encoded bitstream, so it
                     // works regardless of which codec RTSP is using.
                     ensureWebRtcBridge().onStreamStarted(stream)
+                    // Audio doesn't care which video codec/transport is active either -- see
+                    // AudioStreamBridge's kdoc.
+                    ensureAudioBridge().onStreamStarted(stream)
                 } else {
                     Log.e(TAG, "H264 fallback preparation also failed.")
                 }
@@ -599,6 +616,9 @@ class CctvServerService : Service(), ConnectChecker {
         webRtcBridge?.release()
         webRtcBridge = null
         PreviewBus.webRtcBridge.set(null)
+        audioBridge?.release()
+        audioBridge = null
+        PreviewBus.audioBridge.set(null)
         ServiceStateRepository.updateRuntime { it.copy(isStreaming = false) }
 
         // STOP_FOREGROUND_REMOVE needs API 24; the boolean overload covers API 23 too.

@@ -1,12 +1,10 @@
 // --- MSE live preview ---
-// Wire format over /ws (see MseStreamSocket.kt): one text control message with the
-// stream's fps (and sampleRate/channelCount/audioConfig if a microphone is present), then
-// binary messages each prefixed with a 1-byte tag (0=video NAL, 1=AAC frame) straight off
-// the encoders -- no server-side muxing. `h264-converter.js` (vendored, same library
-// ws-scrcpy's web client uses) builds the video fmp4 fragments and manages its own
-// MediaSource/SourceBuffer; there's no equivalent library for audio, so AudioTrackAppender
-// (vendored separately, /audio-muxer.js) is our own small muxer that adds a second
-// SourceBuffer to that same MediaSource.
+// Wire format over /ws (see MseStreamSocket.kt): one text control message with the stream's fps,
+// then binary messages holding raw H.264 NALs straight off the encoder -- no server-side muxing.
+// `h264-converter.js` (vendored, same library ws-scrcpy's web client uses) builds the video fmp4
+// fragments and manages its own MediaSource/SourceBuffer. Video-only: audio is a separate, shared
+// preview independent of which video transport is active -- see audio-preview.js and
+// AudioStreamBridge.kt's kdoc for why.
 //
 // The self-healing below (GOP-based buffer trimming, per-frame stall detection) is a
 // direct port of ws-scrcpy's own web client (src/app/player/MsePlayer.ts /
@@ -52,7 +50,6 @@ function startMsePreview() {
     video.playbackRate = 1.0; // don't inherit a sped-up rate from a previous session
 
     let converter = null;
-    let audioAppender = null;
     let watchdogTimer = null;
     let heartbeatTimer = null;
     let lastDataAt = Date.now();
@@ -101,7 +98,6 @@ function startMsePreview() {
     function snapshot() {
         const quality = typeof video.getVideoPlaybackQuality === 'function' ? video.getVideoPlaybackQuality() : null;
         const sb = converter ? converter.sourceBuffer : null;
-        const audioSb = audioAppender ? audioAppender.sourceBuffer : null;
         return {
             currentTime: video.currentTime.toFixed(2),
             paused: video.paused,
@@ -109,7 +105,6 @@ function startMsePreview() {
             networkState: video.networkState,
             playbackRate: video.playbackRate,
             buffered: rangesOf(sb),
-            audioBuffered: audioAppender ? rangesOf(audioSb) : null,
             sbUpdating: sb ? sb.updating : null,
             wsState: ws ? ws.readyState : null,
             decodedFrames: quality ? quality.totalVideoFrames : null,
@@ -123,7 +118,6 @@ function startMsePreview() {
         const s = snapshot();
         let line = '[MSE] ' + tag + ' t=' + s.currentTime + ' paused=' + s.paused + ' ready=' + s.readyState +
             ' net=' + s.networkState + ' rate=' + s.playbackRate + ' buf=' + s.buffered +
-            (s.audioBuffered !== null ? ' audioBuf=' + s.audioBuffered : '') +
             ' sbUpd=' + s.sbUpdating + ' ws=' + s.wsState +
             ' decFrames=' + s.decodedFrames + ' dropFrames=' + s.droppedFrames;
         if (extra) line += ' ' + JSON.stringify(extra);
@@ -146,8 +140,7 @@ function startMsePreview() {
 
     // Ports ws-scrcpy MsePlayer.cleanSourceBuffer(): once 10 GOPs have accumulated, drop
     // the oldest 5 in one remove() and replay whatever delta frames got held back while
-    // that was in flight. Also trims the audio track to the same span, best-effort --
-    // ws-scrcpy has no audio, so this part isn't in the reference.
+    // that was in flight.
     function cleanSourceBuffer() {
         const sb = converter && converter.sourceBuffer;
         if (!sb || sb.updating) return;
@@ -159,12 +152,6 @@ function startMsePreview() {
             const removeEnd = blocks[4].end;
             blocks = blocks.slice(5);
             sb.remove(removeStart, removeEnd);
-            const audioSb = audioAppender && audioAppender.sourceBuffer;
-            if (audioSb && !audioSb.updating && audioSb.buffered.length) {
-                const audioStart = audioSb.buffered.start(0);
-                const audioEnd = Math.min(removeEnd, audioSb.buffered.end(audioSb.buffered.length - 1));
-                if (audioEnd > audioStart) audioSb.remove(audioStart, audioEnd);
-            }
             let frame = pendingFrames.shift();
             while (frame) {
                 if (!appendVideoFrame(frame)) {
@@ -307,41 +294,32 @@ function startMsePreview() {
         messageCount++;
         if (typeof event.data === 'string') {
             const msg = JSON.parse(event.data);
-            // ws-scrcpy itself never batches (DEFAULT_FRAMES_PER_FRAGMENT=1) -- fine for
-            // its own near-zero-latency local-device pipe. On-device testing here found
-            // the opposite: appendBuffer() ~40 times/sec combined (video+audio, each its
-            // own tiny fmp4 fragment) measurably correlated with more frequent decoder
-            // stalls (checkForBadState's "no-decoded-frames" firing every 5-7s) than
-            // batching a few frames per fragment. 5/3 confirmed on-device that batching
-            // helps but added too much latency; 3/2 (~120-130ms/fragment, ~16
-            // appendBuffer() calls/sec combined) is the current attempt at a smaller
-            // latency cost while keeping most of the stability improvement.
-            converter = new VideoConverter(video, msg.fps, /* framesPerFragment= */ 2);
+            // Back to ws-scrcpy's own default (DEFAULT_FRAMES_PER_FRAGMENT=1, no batching).
+            // This used to be raised (first to 3, then 2) because audio shared this same
+            // MediaSource's appendBuffer() budget, and the *combined* video+audio call rate was
+            // what correlated with decoder stalls (checkForBadState's "no-decoded-frames" firing
+            // every 5-7s) -- see git history. Audio has its own separate preview now (see
+            // audio-preview.js), so this MediaSource only ever sees video's own append rate;
+            // confirmed via Chrome DevTools Protocol console capture (2 runs, 45s and 90s, zero
+            // stall/bad-state log lines in either) that the original problem doesn't reproduce
+            // at video-only load, so there's no reason to keep paying the batching latency.
+            converter = new VideoConverter(video, msg.fps, /* framesPerFragment= */ 1);
             converter.play();
-            if (msg.audioConfig) {
-                audioAppender = new AudioTrackAppender(
-                    converter.mediaSource, msg.sampleRate, msg.channelCount, new Uint8Array(msg.audioConfig),
-                    /* framesPerFragment= */ 2);
-            }
-            log('fps', { fps: msg.fps, hasAudio: !!msg.audioConfig });
+            log('fps', { fps: msg.fps });
             heartbeatTimer = setInterval(() => {
                 log('heartbeat', { msgsPerInterval: messageCount - lastHeartbeatMessageCount });
                 lastHeartbeatMessageCount = messageCount;
             }, MSE_PREVIEW.HEARTBEAT_LOG_INTERVAL_MS);
             return;
         }
-        // First byte is a tag (see MseStreamSocket.kt): 0 = video NAL, 1 = AAC frame.
-        const tag = new Uint8Array(event.data, 0, 1)[0];
-        const payload = new Uint8Array(event.data, 1);
-        if (tag === 0) {
-            inputTimestamps.push(Date.now());
-            if (appendVideoFrame(payload)) {
-                checkForBadState();
-            } else {
-                pendingFrames.push(payload);
-            }
-        } else if (tag === 1 && audioAppender) {
-            audioAppender.appendRawFrame(payload);
+        // Every binary message is a raw H.264 NAL (see MseStreamSocket.kt) -- no tag byte,
+        // audio is a separate preview (see audio-preview.js).
+        const payload = new Uint8Array(event.data);
+        inputTimestamps.push(Date.now());
+        if (appendVideoFrame(payload)) {
+            checkForBadState();
+        } else {
+            pendingFrames.push(payload);
         }
     };
     // Reconnects on close for any reason: not streaming yet, a codec/resolution/fps

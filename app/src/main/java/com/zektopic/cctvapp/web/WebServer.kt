@@ -11,6 +11,7 @@ import com.zektopic.cctvapp.settings.ServiceRuntimeState
 import com.zektopic.cctvapp.settings.ServiceSettings
 import com.zektopic.cctvapp.settings.SettingUpdateHandler
 import com.zektopic.cctvapp.settings.ServiceStateRepository
+import com.zektopic.cctvapp.audio.AudioStreamSocket
 import com.zektopic.cctvapp.mse.MseStreamSocket
 import com.zektopic.cctvapp.webrtc.WebRtcSignalingSocket
 import fi.iki.elonen.NanoWSD
@@ -114,11 +115,12 @@ class WebServer(
     }
 
     /**
-     * `/ws` (MSE preview) and `/webrtc-ws` (the dashboard's WebRTC preview) are the only WebSocket
-     * routes; [WebAuth]'s Origin/Basic-Auth checks run here (from the handshake request's
-     * headers) exactly like every HTTP route above -- see [MseStreamSocket]'s kdoc for why the
-     * actual rejection has to happen after the handshake completes rather than by returning
-     * something else from here.
+     * `/ws` (MSE video preview), `/webrtc-ws` (the dashboard's WebRTC video preview), and
+     * `/audio-ws` (the shared audio preview, used regardless of which video transport is active
+     * -- see `AudioStreamBridge`'s kdoc) are the only WebSocket routes; [WebAuth]'s
+     * Origin/Basic-Auth checks run here (from the handshake request's headers) exactly like every
+     * HTTP route above -- see [MseStreamSocket]'s kdoc for why the actual rejection has to happen
+     * after the handshake completes rather than by returning something else from here.
      */
     override fun openWebSocket(handshake: IHTTPSession): WebSocket {
         val headers = handshake.headers ?: emptyMap()
@@ -126,10 +128,10 @@ class WebServer(
             WebAuth.isAuthorized(
                 settings.webAuthEnabled, settings.authUsername, settings.authPassword, headers["authorization"]
             )
-        return if (handshake.uri == "/webrtc-ws") {
-            WebRtcSignalingSocket(handshake, authorized)
-        } else {
-            MseStreamSocket(handshake, authorized)
+        return when (handshake.uri) {
+            "/webrtc-ws" -> WebRtcSignalingSocket(handshake, authorized)
+            "/audio-ws" -> AudioStreamSocket(handshake, authorized)
+            else -> MseStreamSocket(handshake, authorized)
         }
     }
 
@@ -240,8 +242,8 @@ class WebServer(
             return newFixedLengthResponse(Response.Status.OK, "application/javascript", h264ConverterJs)
         }
 
-        if (uri == "/audio-muxer.js") {
-            return newFixedLengthResponse(Response.Status.OK, "application/javascript", audioMuxerJs)
+        if (uri == "/audio-preview.js") {
+            return newFixedLengthResponse(Response.Status.OK, "application/javascript", audioPreviewJs)
         }
 
         if (uri == "/mse-preview.js") {
@@ -421,7 +423,7 @@ class WebServer(
     private val dashboardTemplate: String by lazy { loadAsset("web/dashboard.html") }
     private val recordingsTemplate: String by lazy { loadAsset("web/recordings.html") }
     private val h264ConverterJs: String by lazy { loadAsset("web/h264-converter.js") }
-    private val audioMuxerJs: String by lazy { loadAsset("web/audio-muxer.js") }
+    private val audioPreviewJs: String by lazy { loadAsset("web/audio-preview.js") }
     private val msePreviewJs: String by lazy { loadAsset("web/mse-preview.js") }
     private val webRtcPreviewJs: String by lazy { loadAsset("web/webrtc-preview.js") }
     private val dashboardJs: String by lazy { loadAsset("web/dashboard.js") }

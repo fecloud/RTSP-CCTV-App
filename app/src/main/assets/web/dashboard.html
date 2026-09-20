@@ -407,14 +407,16 @@
         <!-- Preview -->
         <div class="preview-card">
             <div class="preview-wrapper">
-                <!-- muted so autoplay is never blocked by browser policy -- the user can
-                     unmute via native controls' own icon whenever they want sound. -->
+                <!-- muted so autoplay is never blocked by browser policy -- this element never
+                     carries an audio track in either preview mode (audio is a separate, shared
+                     preview, see audio-preview.js), so chipAudioMute is the only volume control. -->
                 <video id="cam-preview" autoplay muted playsinline controls></video>
                 <div class="preview-overlay">
                     <span class="chip" id="chipPreviewType" style="cursor:pointer;"></span>
                     <span class="chip" id="chipRec" style="display:none;color:var(--danger);">● REC</span>
                     <span class="chip" id="chipCodec">—</span>
                     <span class="chip" id="chipRes">—</span>
+                    <span class="chip" id="chipAudioMute" style="cursor:pointer;" onclick="toggleAudioMute()">🔇</span>
                 </div>
             </div>
             <div class="controls">
@@ -631,9 +633,9 @@
         var CCTV_PREVIEW_TYPE = localStorage.getItem('cctv-preview-type') === 'webrtc' ? 'webrtc' : 'mse';
     </script>
     <script src="/h264-converter.js"></script>
-    <script src="/audio-muxer.js"></script>
     <script src="/mse-preview.js"></script>
     <script src="/webrtc-preview.js"></script>
+    <script src="/audio-preview.js"></script>
     <script src="/dashboard.js"></script>
 </body>
 </html>

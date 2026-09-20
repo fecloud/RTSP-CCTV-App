@@ -3,35 +3,30 @@ package com.zektopic.cctvapp.webrtc
 import android.content.Context
 import com.zektopic.cctvapp.streaming.SharedCameraStream
 import org.webrtc.PeerConnection
-import org.webrtc.audio.JavaAudioDeviceModule
 
 /**
- * Shared WebRTC video/audio source feeding every dashboard viewer that's opted into the WebRTC
- * preview (see `dashboard.js`'s preview-type chip) off one [SharedCameraStream]. Unlike
- * [com.zektopic.cctvapp.mse.MseVideoBridge] (which forwards the
- * already-hardware-encoded H264/AAC bitstream), [WebRtcEngine] taps the camera's raw GL
- * composite via [com.pedro.library.view.GlStreamInterface.addMultiPreviewSurface] -- a second
- * render target off the same EGL context RootEncoder already draws the encoder's frame into, so
- * no second `Camera2` session is needed, and it works regardless of which codec RTSP currently
- * has selected (WebRTC re-encodes the raw frames itself).
+ * Shared WebRTC video source feeding every dashboard viewer that's opted into the WebRTC preview
+ * (see `dashboard.js`'s preview-type chip) off one [SharedCameraStream]. Unlike
+ * [com.zektopic.cctvapp.mse.MseVideoBridge] (which forwards the already-hardware-encoded H264
+ * bitstream), [WebRtcEngine] taps the camera's raw GL composite via
+ * [com.pedro.library.view.GlStreamInterface.addMultiPreviewSurface] -- a second render target off
+ * the same EGL context RootEncoder already draws the encoder's frame into, so no second `Camera2`
+ * session is needed, and it works regardless of which codec RTSP currently has selected (WebRTC
+ * re-encodes the raw frames itself).
  *
- * Audio is the one place this can't reuse the shared pipeline: [JavaAudioDeviceModule] opens
- * its own `AudioRecord`, independent of the `MicrophoneSource`/`AudioEncoder` pipeline
- * [SharedCameraStream] already runs for RTSP/MSE -- this is a known, accepted tradeoff (see
- * root `CLAUDE.md`'s "Known constraints"): it only exists while at least one WebRTC viewer is
- * actually connected ([attachViewer]/[detachViewer] reference-count that via [WebRtcEngine]'s
- * start/stop), so plain MSE/RTSP usage never pays for it, and some devices' mic HALs may not
- * tolerate the resulting concurrent capture (this is exactly why this project's original WebRTC
- * preview was replaced by the current MSE one -- see git history).
+ * Video-only -- audio is a separate, shared preview independent of which video transport is
+ * active, see `com.zektopic.cctvapp.audio.AudioStreamBridge`'s kdoc for why (a real WebRTC audio
+ * track would need a second concurrent `AudioRecord` this app's target hardware's
+ * `AudioPolicyManager` outright refuses to grant while `SharedCameraStream`'s own
+ * `MicrophoneSource` is already recording).
  *
- * This class itself only does viewer bookkeeping (reference counting, [PeerConnection] creation
- * per viewer) -- the actual engine resources (factory, tracks, GL preview surface) live in
+ * This class does viewer bookkeeping (reference counting, [PeerConnection] creation per viewer)
+ * -- the actual engine resources (factory, video track, GL preview surface) live in
  * [WebRtcEngine], created/torn down here as the viewer count goes 0->1/1->0.
  */
 class WebRtcPreviewBridge(private val context: Context) {
 
     private companion object {
-        /** Same id for both tracks so the browser groups them into one `MediaStream` in `ontrack` instead of two. */
         private const val STREAM_ID = "cctv-stream"
     }
 
@@ -51,7 +46,7 @@ class WebRtcPreviewBridge(private val context: Context) {
 
     /**
      * Lazily brings up [WebRtcEngine] on the first viewer, and hands back a fresh
-     * [PeerConnection] carrying its shared tracks. Returns null if the camera isn't actually
+     * [PeerConnection] carrying its shared video track. Returns null if the camera isn't actually
      * streaming yet, mirroring `MseVideoBridge.snapshotForNewViewer` returning null pre-stream.
      */
     @Synchronized
@@ -64,7 +59,6 @@ class WebRtcPreviewBridge(private val context: Context) {
         }
         val pc = activeEngine.factory.createPeerConnection(rtcConfig, observer) ?: return null
         pc.addTrack(activeEngine.videoTrack, listOf(STREAM_ID))
-        pc.addTrack(activeEngine.audioTrack, listOf(STREAM_ID))
         viewerCount++
         return pc
     }

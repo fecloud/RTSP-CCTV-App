@@ -4,7 +4,6 @@ import android.media.MediaCodec
 import android.media.MediaFormat
 import com.pedro.common.isKeyframe
 import com.pedro.common.toByteArray
-import com.pedro.encoder.audio.GetAudioData
 import com.pedro.encoder.video.GetVideoData
 import com.zektopic.cctvapp.log.AppLog as Log
 import com.zektopic.cctvapp.settings.ServiceStateRepository
@@ -13,24 +12,16 @@ import java.nio.ByteBuffer
 import java.util.concurrent.CopyOnWriteArrayList
 
 /**
- * Bridges [SharedCameraStream]'s raw H.264 + AAC output into the dashboard's MSE preview. Unlike
- * the fmp4-muxing design this replaced, the server does no container work at all -- it forwards
- * raw Annex-B NALs (start code included) and raw AAC-LC frames straight from the encoders, and
- * the dashboard's client builds the fmp4 fragments itself: `h264-converter.js` (vendored, the
- * same library ws-scrcpy's web client uses) for video, and a small hand-written muxer in
- * `dashboard.html` for audio (there's no equivalent library for that, and this project's own
- * former `Fmp4Fragmenter.kt` already had a proven audio box layout to port -- see its kdoc via
- * git history).
+ * Bridges [SharedCameraStream]'s raw H.264 output into the dashboard's MSE preview. Unlike the
+ * fmp4-muxing design this replaced, the server does no container work at all -- it forwards raw
+ * Annex-B NALs (start code included) straight from the encoder, and the dashboard's client builds
+ * the fmp4 fragments itself: `h264-converter.js` (vendored, the same library ws-scrcpy's web
+ * client uses).
+ *
+ * Video-only -- audio is a separate, shared preview independent of which video transport is
+ * active (MSE or WebRTC), see `com.zektopic.cctvapp.audio.AudioStreamBridge`'s kdoc.
  */
-class MseVideoBridge : GetVideoData, GetAudioData {
-
-    /**
-     * A P-frame decodes only relative to the frames before it back to the last keyframe -- a
-     * viewer that missed any of that chain (e.g. attached mid-GOP) can't decode [VIDEO_DELTA]
-     * NALs until [VIDEO_KEYFRAME] resyncs it. [AUDIO] frames have no such dependency and are
-     * never gated -- see [MseStreamSocket.enqueue].
-     */
-    enum class MseFrameKind { VIDEO_KEYFRAME, VIDEO_DELTA, AUDIO }
+class MseVideoBridge : GetVideoData {
 
     private companion object {
         private const val TAG = "MseVideoBridge"
@@ -40,30 +31,13 @@ class MseVideoBridge : GetVideoData, GetAudioData {
     @Volatile private var ppsBytes: ByteArray? = null
     @Volatile private var lastFps = -1
 
-    @Volatile private var audioConfigBytes: ByteArray? = null
-    @Volatile private var sampleRate = -1
-    @Volatile private var channelCount = -1
-
     /** The exact [SharedCameraStream] instance this is currently registered on, if any -- see [onStreamStarted]. */
     private var registeredOn: SharedCameraStream? = null
 
     private val viewers = CopyOnWriteArrayList<MseStreamSocket>()
 
-    /**
-     * Everything a newly-connecting viewer needs to construct its own `VideoConverter` (and, if
-     * a microphone is actually present -- see [onAudioFormat] -- its own audio track appender).
-     * Video is mandatory; the three audio fields are all null or all non-null together, since a
-     * missing `RECORD_AUDIO` permission means `onAudioFormat` never fires (see `NoAudioSource`
-     * in `CctvServerService`) and the preview should just degrade to video-only, not fail.
-     */
-    data class ViewerHandshake(
-        val fps: Int,
-        val sps: ByteArray,
-        val pps: ByteArray,
-        val sampleRate: Int?,
-        val channelCount: Int?,
-        val audioConfig: ByteArray?,
-    ) {
+    /** Everything a newly-connecting viewer needs to construct its own `VideoConverter`. */
+    data class ViewerHandshake(val fps: Int, val sps: ByteArray, val pps: ByteArray) {
         override fun equals(other: Any?): Boolean {
             if (this === other) return true
             if (javaClass != other?.javaClass) return false
@@ -71,22 +45,16 @@ class MseVideoBridge : GetVideoData, GetAudioData {
             other as ViewerHandshake
 
             if (fps != other.fps) return false
-            if (sampleRate != other.sampleRate) return false
-            if (channelCount != other.channelCount) return false
             if (!sps.contentEquals(other.sps)) return false
             if (!pps.contentEquals(other.pps)) return false
-            if (!audioConfig.contentEquals(other.audioConfig)) return false
 
             return true
         }
 
         override fun hashCode(): Int {
             var result = fps
-            result = 31 * result + (sampleRate ?: 0)
-            result = 31 * result + (channelCount ?: 0)
             result = 31 * result + sps.contentHashCode()
             result = 31 * result + pps.contentHashCode()
-            result = 31 * result + (audioConfig?.contentHashCode() ?: 0)
             return result
         }
     }
@@ -94,13 +62,7 @@ class MseVideoBridge : GetVideoData, GetAudioData {
     fun snapshotForNewViewer(): ViewerHandshake? {
         val sps = spsBytes ?: return null
         val pps = ppsBytes ?: return null
-        val audioConfig = audioConfigBytes
-        return ViewerHandshake(
-            fps = lastFps, sps = sps, pps = pps,
-            sampleRate = if (audioConfig != null) sampleRate else null,
-            channelCount = if (audioConfig != null) channelCount else null,
-            audioConfig = audioConfig,
-        )
+        return ViewerHandshake(fps = lastFps, sps = sps, pps = pps)
     }
 
     /** Called once per successful `startStream()`; listener registration is idempotent since the stream instance is a long-lived singleton. */
@@ -114,7 +76,6 @@ class MseVideoBridge : GetVideoData, GetAudioData {
         if (registeredOn === stream) return
         registeredOn = stream
         stream.addVideoDataListener(this)
-        stream.addAudioDataListener(this)
     }
 
     /** Called instead of [onStreamStarted] when the active codec isn't H264 -- this bridge can't carry H265. */
@@ -139,28 +100,7 @@ class MseVideoBridge : GetVideoData, GetAudioData {
     override fun getVideoData(videoBuffer: ByteBuffer, info: MediaCodec.BufferInfo) {
         if (viewers.isEmpty()) return
         val nal = normalizeStartCode(bufferToArray(videoBuffer, info))
-        val kind = if (info.isKeyframe()) MseFrameKind.VIDEO_KEYFRAME else MseFrameKind.VIDEO_DELTA
-        viewers.forEach { it.enqueue(kind, nal) }
-    }
-
-    override fun onAudioFormat(mediaFormat: MediaFormat) {
-        val newConfig = mediaFormat.getByteBuffer("csd-0")?.toByteArray() ?: return
-        val newSampleRate = if (mediaFormat.containsKey(MediaFormat.KEY_SAMPLE_RATE)) mediaFormat.getInteger(MediaFormat.KEY_SAMPLE_RATE) else sampleRate
-        val newChannelCount = if (mediaFormat.containsKey(MediaFormat.KEY_CHANNEL_COUNT)) mediaFormat.getInteger(MediaFormat.KEY_CHANNEL_COUNT) else channelCount
-        if (audioConfigBytes != null && (!audioConfigBytes.contentEquals(newConfig) || sampleRate != newSampleRate || channelCount != newChannelCount)) {
-            Log.d(TAG, "Audio format changed -- closing ${viewers.size} viewer(s) so they reconnect cleanly")
-            closeAllViewers("Stream configuration changed")
-        }
-        audioConfigBytes = newConfig
-        sampleRate = newSampleRate
-        channelCount = newChannelCount
-    }
-
-    /** Called from the shared camera callback thread -- must never block. Never gated: see [MseFrameKind]. */
-    override fun getAudioData(audioBuffer: ByteBuffer, info: MediaCodec.BufferInfo) {
-        if (viewers.isEmpty()) return
-        val frame = bufferToArray(audioBuffer, info)
-        viewers.forEach { it.enqueue(MseFrameKind.AUDIO, frame) }
+        viewers.forEach { it.enqueue(info.isKeyframe(), nal) }
     }
 
     fun requestKeyframe() {
@@ -181,10 +121,7 @@ class MseVideoBridge : GetVideoData, GetAudioData {
 
     /** Only called from the service's `onDestroy()`. */
     fun release() {
-        registeredOn?.let {
-            it.removeVideoDataListener(this)
-            it.removeAudioDataListener(this)
-        }
+        registeredOn?.removeVideoDataListener(this)
         registeredOn = null
         closeAllViewers("Server shutting down")
     }

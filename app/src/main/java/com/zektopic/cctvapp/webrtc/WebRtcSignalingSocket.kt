@@ -26,8 +26,8 @@ import org.webrtc.SessionDescription
 /**
  * One instance per browser tab -- created by [com.zektopic.cctvapp.web.WebServer.openWebSocket]
  * for every `/webrtc-ws` connection. Pure JSON signaling relay: the browser always initiates
- * with an SDP offer built from `recvonly` transceivers (see `webrtc-preview.js`); this replies
- * with an answer built from [WebRtcPreviewBridge]'s shared video/audio tracks, then relays ICE
+ * with an SDP offer built from a `recvonly` video transceiver (see `webrtc-preview.js`); this
+ * replies with an answer built from [WebRtcPreviewBridge]'s shared video track, then relays ICE
  * candidates both ways. LAN-only by design (`PeerConnection.RTCConfiguration(emptyList())` in
  * [WebRtcPreviewBridge.attachViewer] -- no STUN/TURN), so a host candidate is always enough.
  *

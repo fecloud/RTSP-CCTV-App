@@ -82,34 +82,47 @@ flowchart LR
     MIC[Microphone] --> AENC[AAC encoder]
     ENC --> RTSP[RTSP server<br/>:8554]
     AENC --> RTSP
-    ENC --> RELAY[Raw NAL/AAC relay<br/>one encode, any number of viewers]
-    AENC --> RELAY
+    ENC --> RELAY[Raw NAL relay<br/>one encode, any number of viewers]
+    AENC --> ARELAY[Raw AAC relay<br/>shared by every preview mode]
 
     RELAY --> WS[WebSocket<br/>:8081/ws]
+    ARELAY --> AWS[WebSocket<br/>:8081/audio-ws]
 
     RTSP --> NVR[VLC / OBS / Frigate / NVR]
-    WS --> BROWSER[Browser dashboard<br/>h264-converter.js + hand-written audio muxer,<br/>MediaSource / two SourceBuffers]
+    WS --> BROWSER[Browser dashboard<br/>h264-converter.js, MediaSource]
+    AWS --> BROWSER
 ```
 
 Everything runs inside one foreground service. The RTSP stream comes straight off the
 hardware encoders; the dashboard's live preview forwards those same encoders' raw H.264 NALs
-and raw AAC frames (no server-side muxing) to every connected browser tab over one WebSocket
-each, sharing one camera/mic capture rather than opening it once per viewer. Each tab builds
-the fragmented MP4 client-side and feeds a `<video>` via Media Source Extensions: video
-through `h264-converter.js` (vendored, the same library ws-scrcpy's web client uses), audio
-through `audio-muxer.js` (no equivalent library exists for that, so it's this project's own
-code -- ported from the fmp4-muxing design this replaced). The self-healing playback logic
+(no server-side muxing) to every connected browser tab over one WebSocket each, sharing one
+camera capture rather than opening it once per viewer. Each tab builds the fragmented MP4
+client-side and feeds a `<video>` via Media Source Extensions, through `h264-converter.js`
+(vendored, the same library ws-scrcpy's web client uses). The self-healing playback logic
 (GOP-based buffer trimming, per-frame stall detection/recovery -- a port of ws-scrcpy's own
 `MsePlayer.ts`/`BasePlayer.ts`) lives in `mse-preview.js`; everything else on the dashboard
 page (zoom, settings, status polling) is `dashboard.js`.
 
+Audio is a separate, shared preview independent of which video transport (MSE or WebRTC) is
+active: RootEncoder's mic capture runs continuously regardless, so one raw-PCM relay over its
+own WebSocket serves every dashboard tab no matter which video mode it's showing. The browser
+schedules it directly with the Web Audio API (`AudioBufferSourceNode.start(time)`), no decode
+step at all -- MediaSource/SourceBuffer fed AAC, and separately the WebCodecs `AudioDecoder`
+API, were both tried and reverted (the former has no live-edge tracking of its own once audio
+isn't riding along inside a video preview's own self-healing anymore, so latency just
+accumulates forever; the latter is unavailable in some browsers, e.g. Firefox). Raw PCM's
+bandwidth cost (8x AAC's, at this app's bitrate) is trivial next to the video already on the
+same LAN connection.
+
 | Component | File |
 |---|---|
 | Foreground service, camera, stream lifecycle | `CctvServerService.kt` |
-| HTTP server, dashboard and WebSocket route | `WebServer.kt` |
-| Camera pipeline shared by RTSP/recording/MSE | `SharedCameraStream.kt` |
-| Per-viewer MSE broadcast (raw NAL relay) and WebSocket handling | `MseVideoBridge.kt`, `MseStreamSocket.kt` |
-| MSE client: video fmp4 muxing (vendored), audio fmp4 muxing (ours), self-healing playback, dashboard UI | `h264-converter.js`, `audio-muxer.js`, `mse-preview.js`, `dashboard.js` |
+| HTTP server, dashboard and WebSocket routes | `WebServer.kt` |
+| Camera pipeline shared by RTSP/recording/MSE/WebRTC | `SharedCameraStream.kt` |
+| Per-viewer MSE video broadcast (raw NAL relay) and WebSocket handling | `MseVideoBridge.kt`, `MseStreamSocket.kt` |
+| Shared audio broadcast (raw PCM relay), independent of video transport | `AudioStreamBridge.kt`, `AudioStreamSocket.kt` |
+| MSE client: video fmp4 muxing (vendored), self-healing playback, dashboard UI | `h264-converter.js`, `mse-preview.js`, `dashboard.js` |
+| Shared audio playback: direct Web Audio API scheduling, no decode step | `audio-preview.js` |
 | Authentication, CSRF and HTML escaping | `WebAuth.kt` |
 | Settings | `AppPreferences.kt` |
 
@@ -232,46 +245,63 @@ cross-origin `Origin` header are rejected with `403`.
 ### Live preview (MSE)
 
 The dashboard's live preview is MSE (Media Source Extensions), not a plain HTTP endpoint:
-`WS /ws` streams raw H.264 (subject to the same Origin/Basic-Auth checks as every route
-above, checked once against the WebSocket upgrade request's headers). One browser tab
-opens one `/ws` connection; every connection is fed from the same encoder output -- any
-number of tabs can watch at once without a second hardware encode. There's no SDP/ICE
-negotiation: the socket is send-only from the phone's side, so it only works between
+`WS /ws` streams raw H.264, video only (subject to the same Origin/Basic-Auth checks as
+every route above, checked once against the WebSocket upgrade request's headers). One
+browser tab opens one `/ws` connection; every connection is fed from the same encoder
+output -- any number of tabs can watch at once without a second hardware encode. There's no
+SDP/ICE negotiation: the socket is send-only from the phone's side, so it only works between
 devices that can reach each other directly (this app is LAN-only by design, see "Security"
 above). Requires the H264 codec -- switching to H265 closes every connected viewer, since
-the client can't decode it. Audio rides along whenever a microphone is actually present
-(`RECORD_AUDIO` granted); without it the preview just degrades to video-only.
+the client can't decode it.
 
 The server does no container work at all; each tab's own client-side code builds the
-fragmented MP4 itself -- video via `h264-converter.js` (vendored, the same library
-ws-scrcpy's web client uses), audio via `audio-muxer.js` (no equivalent library exists, so
-this is this project's own code). Every binary WebSocket frame
-is prefixed with a 1-byte tag so the client can tell the two apart. The wire format is one
-text frame, then binary frames:
+fragmented MP4 itself via `h264-converter.js` (vendored, the same library ws-scrcpy's web
+client uses). The wire format is one text frame, then binary frames:
 
 ```jsonc
-// Phone -> browser, once on connect. sampleRate/channelCount/audioConfig are present only
-// if a microphone is available; audioConfig is the raw 2-byte AAC AudioSpecificConfig
-// (csd-0) as a JSON array of unsigned bytes.
-{"fps": 30, "sampleRate": 44100, "channelCount": 2, "audioConfig": [18, 16]}
+// Phone -> browser, once on connect.
+{"fps": 30}
 ```
 ```
-// Phone -> browser, binary WebSocket frames -- each prefixed with a 1-byte tag:
-//   tag 0: a raw Annex-B H.264 NAL (start code included), straight off the video encoder.
-//     The first one (sent right after the control message above) is SPS + PPS concatenated.
-//   tag 1: a raw AAC-LC frame (no ADTS header), straight off the audio encoder.
+// Phone -> browser, binary WebSocket frames -- each one a raw Annex-B H.264 NAL (start code
+// included), straight off the video encoder. The first one (sent right after the control
+// message above) is SPS + PPS concatenated.
 ```
 
-Every new viewer is gated on video: NALs are dropped until a real IDR keyframe arrives (the
-client's muxer treats whatever it's given first as the keyframe, whether or not it actually
-is, so a non-IDR NAL first would build a broken init segment). Audio frames are never gated
--- they have no such reference-chain dependency. A frame rate, SPS, or audio format change
-closes every connected `/ws` viewer (a fresh `VideoConverter`/audio muxer only picks up the
-first config it's ever given) -- the dashboard reconnects automatically and starts new ones.
+Every new viewer is gated: NALs are dropped until a real IDR keyframe arrives (the client's
+muxer treats whatever it's given first as the keyframe, whether or not it actually is, so a
+non-IDR NAL first would build a broken init segment). A frame rate or SPS change closes
+every connected `/ws` viewer (a fresh `VideoConverter` only picks up the first config it's
+ever given) -- the dashboard reconnects automatically and starts a new one.
 
 If the camera isn't currently streaming, the server closes the socket immediately
 (`GoingAway`) rather than accepting an offer it has nothing to answer with -- see
 `app/src/main/assets/web/mse-preview.js`, which just reconnects on a timer.
+
+### Shared audio preview
+
+Audio is a separate WebSocket, `WS /audio-ws`, shared by both the MSE and WebRTC video
+previews -- it doesn't care which one is active, or whether either is even connected.
+Available whenever a microphone is present (`RECORD_AUDIO` granted); if not, or before the
+mic has produced its first frame, the server closes the socket immediately (`GoingAway`) the
+same way `/ws` does pre-stream. Same send-only, LAN-only, no-SDP/ICE design as `/ws`; the wire
+format is one text frame, then binary frames:
+
+```jsonc
+// Phone -> browser, once on connect. Fixed for this app's lifetime -- see
+// CctvServerService.kt's `stream.prepareAudio(sampleRate = 16000, isStereo = false, ...)`.
+{"sampleRate": 16000, "channelCount": 1}
+```
+```
+// Phone -> browser, binary WebSocket frames -- each one a raw 16-bit PCM chunk, straight off
+// the microphone. No encoding, no container.
+```
+
+The browser schedules these directly with the Web Audio API (`audio-preview.js`,
+`AudioBufferSourceNode.start(time)`) -- no decode step, no MediaSource/SourceBuffer. Each
+chunk is scheduled at `max(<next queued time>, <audio clock now>)`, which is what keeps
+playback latency from silently accumulating the way a buffered approach (MediaSource, tried
+first) would.
 
 <details>
 <summary><b>Keys accepted by <code>/action/set-setting</code></b></summary>

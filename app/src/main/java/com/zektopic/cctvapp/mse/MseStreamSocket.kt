@@ -15,20 +15,17 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import org.json.JSONArray
 import org.json.JSONObject
 
 /**
  * One instance per browser tab -- created by [com.zektopic.cctvapp.web.WebServer.openWebSocket]
- * for every `/ws` connection. Send-only: on [onOpen] it sends the control message (fps, and audio
- * format if a microphone is present) and the SPS+PPS, then registers with [MseVideoBridge] for
- * the ongoing broadcast of raw NALs/AAC frames -- [enqueue] drops non-keyframe video NALs from
- * that broadcast until a fresh keyframe arrives, since this viewer's `h264-converter.js`
- * `VideoConverter` has no valid reference chain before then (and, unlike a real decoder, would
- * otherwise happily treat whatever NAL it sees first as if it were one). Audio frames are never
- * gated -- they have no such dependency chain. Every binary message is prefixed with a 1-byte tag
- * ([TAG_VIDEO]/[TAG_AUDIO]) so the client can tell them apart. See `dashboard.html` for the
- * client side.
+ * for every `/ws` connection. Send-only, video-only (audio is a separate, shared preview -- see
+ * `com.zektopic.cctvapp.audio.AudioStreamBridge`'s kdoc): on [onOpen] it sends the control message
+ * (fps) and the SPS+PPS, then registers with [MseVideoBridge] for the ongoing broadcast of raw
+ * NALs -- [enqueue] drops non-keyframe NALs from that broadcast until a fresh keyframe arrives,
+ * since this viewer's `h264-converter.js` `VideoConverter` has no valid reference chain before
+ * then (and, unlike a real decoder, would otherwise happily treat whatever NAL it sees first as
+ * if it were one). See `dashboard.html`/`mse-preview.js` for the client side.
  *
  * [authorized] is decided in `openWebSocket()` from the handshake headers -- NanoWSD always
  * completes the 101 handshake regardless, so an unauthorized connection is closed in [onOpen].
@@ -46,9 +43,6 @@ class MseStreamSocket(
 
         /** Bounded so a slow/dead viewer can never make the shared camera callback thread ([enqueue]) block. */
         private const val PENDING_QUEUE_CAPACITY = 64
-
-        private const val TAG_VIDEO: Byte = 0
-        private const val TAG_AUDIO: Byte = 1
 
         /**
          * Shared by every connected viewer -- a keepalive tick is a cheap periodic check (a ping
@@ -91,15 +85,8 @@ class MseStreamSocket(
             return
         }
         try {
-            val controlMessage = JSONObject().put("fps", handshake.fps)
-            if (handshake.audioConfig != null) {
-                controlMessage.put("sampleRate", handshake.sampleRate)
-                controlMessage.put("channelCount", handshake.channelCount)
-                controlMessage.put("audioConfig", JSONArray(handshake.audioConfig.map { it.toInt() and 0xFF }))
-            }
-            send(controlMessage.toString())
-            val spsAndPps = ByteArrayOutputStream(1 + handshake.sps.size + handshake.pps.size).apply {
-                write(TAG_VIDEO.toInt())
+            send(JSONObject().put("fps", handshake.fps).toString())
+            val spsAndPps = ByteArrayOutputStream(handshake.sps.size + handshake.pps.size).apply {
                 write(handshake.sps)
                 write(handshake.pps)
             }.toByteArray()
@@ -116,33 +103,28 @@ class MseStreamSocket(
         startKeepAlive()
     }
 
-    /** Called from [MseVideoBridge.getVideoData]/[MseVideoBridge.getAudioData] on the shared camera callback thread -- must never block. */
-    fun enqueue(kind: MseVideoBridge.MseFrameKind, payload: ByteArray) {
-        if (kind == MseVideoBridge.MseFrameKind.VIDEO_DELTA && awaitingKeyframe) {
+    /** Called from [MseVideoBridge.getVideoData] on the shared camera callback thread -- must never block. */
+    fun enqueue(isKeyframe: Boolean, nal: ByteArray) {
+        if (!isKeyframe && awaitingKeyframe) {
             droppedDeltaCount++
             return
         }
-        if (kind == MseVideoBridge.MseFrameKind.VIDEO_KEYFRAME) {
+        if (isKeyframe) {
             if (droppedDeltaCount > 0) Log.d(TAG, "Resynced by fresh keyframe after dropping $droppedDeltaCount NAL(s)")
             droppedDeltaCount = 0
             awaitingKeyframe = false
         }
-        val tag = if (kind == MseVideoBridge.MseFrameKind.AUDIO) TAG_AUDIO else TAG_VIDEO
-        val tagged = ByteArray(1 + payload.size).also {
-            it[0] = tag
-            System.arraycopy(payload, 0, it, 1, payload.size)
-        }
-        if (!pending.offer(tagged)) {
-            // A full queue means we're about to evict the oldest queued item. Only a video delta's
-            // loss matters here -- it breaks the reference chain just as surely as the gate above,
-            // so re-gate and ask for a fresh keyframe instead of waiting out the next one. Losing a
-            // keyframe or an audio frame this way doesn't need the same response (a keyframe just
-            // resynced the chain regardless of what got evicted before it -- confirmed on-device as
-            // a real bug when this used to re-arm the gate on itself unconditionally, silently
-            // dropping every frame after it forever; audio has no reference chain to break).
+        if (!pending.offer(nal)) {
+            // A full queue means we're about to evict the oldest queued item, which breaks the
+            // reference chain just as surely as the gate above -- re-gate and ask for a fresh
+            // keyframe instead of waiting out the next one (confirmed on-device as a real bug
+            // when this used to re-arm the gate on itself unconditionally, silently dropping
+            // every frame after it forever). Losing a keyframe this way doesn't need the same
+            // response -- a keyframe just resynced the chain regardless of what got evicted
+            // before it.
             pending.poll()
-            pending.offer(tagged)
-            if (kind == MseVideoBridge.MseFrameKind.VIDEO_DELTA) {
+            pending.offer(nal)
+            if (!isKeyframe) {
                 if (!awaitingKeyframe) Log.w(TAG, "Send queue full, re-gating viewer and requesting a fresh keyframe")
                 awaitingKeyframe = true
                 needsKeyframeRequest = true
