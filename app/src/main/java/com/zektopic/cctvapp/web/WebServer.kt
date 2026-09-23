@@ -213,6 +213,7 @@ class WebServer(
                 "timestampPosition":"${s.timestampPosition}",
                 "timestampSize":"${s.timestampSize}",
                 "flashlightEnabled":${s.flashlightEnabled},
+                "autoFocusEnabled":${s.autoFocusEnabled},
                 "nightModeEnabled":${s.nightModeEnabled},
                 "verticalFlipEnabled":${s.verticalFlipEnabled},
                 "zoomLevel":${s.zoomLevel},

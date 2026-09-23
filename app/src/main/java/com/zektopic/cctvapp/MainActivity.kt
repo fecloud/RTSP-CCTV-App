@@ -175,6 +175,7 @@ class MainActivity : AppCompatActivity() {
 
         // Load saved flashlight & night mode settings
         binding.switchFlashlight.isChecked = s.flashlightEnabled
+        binding.switchAutoFocus.isChecked = s.autoFocusEnabled
         binding.switchNightMode.isChecked = s.nightModeEnabled
         binding.switchVerticalFlip.isChecked = s.verticalFlipEnabled
         binding.sliderZoomLevel.value = s.zoomLevel
@@ -291,6 +292,10 @@ class MainActivity : AppCompatActivity() {
         // Flashlight & Night Mode listeners
         binding.switchFlashlight.setOnCheckedChangeListener { _, isChecked ->
             ServiceStateRepository.updateSettings(this) { it.copy(flashlightEnabled = isChecked) }
+        }
+
+        binding.switchAutoFocus.setOnCheckedChangeListener { _, isChecked ->
+            ServiceStateRepository.updateSettings(this) { it.copy(autoFocusEnabled = isChecked) }
         }
 
         binding.switchNightMode.setOnCheckedChangeListener { _, isChecked ->

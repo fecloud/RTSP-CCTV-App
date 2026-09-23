@@ -42,6 +42,7 @@
     <!-- Flashlight & Night Mode strings -->
     <string name="section_camera_controls">Camera Controls</string>
     <string name="flashlight_toggle">Flashlight</string>
+    <string name="auto_focus_toggle">Auto Focus</string>
     <string name="night_mode_toggle">Night Mode (Auto Flash)</string>
     <string name="vertical_flip_toggle">Vertical Flip (Upside-Down Mount)</string>
     <string name="zoom_level">Zoom</string>

@@ -126,6 +126,7 @@ function fetchStatus() {
             document.getElementById('posSelect').value = data.timestampPosition;
             document.getElementById('sizeSelect').value = data.timestampSize;
             document.getElementById('toggleFlashlight').checked = data.flashlightEnabled;
+            document.getElementById('toggleAutoFocus').checked = data.autoFocusEnabled;
             document.getElementById('toggleNightMode').checked = data.nightModeEnabled;
             document.getElementById('toggleVerticalFlip').checked = data.verticalFlipEnabled;
             if (!zoomDragging) {

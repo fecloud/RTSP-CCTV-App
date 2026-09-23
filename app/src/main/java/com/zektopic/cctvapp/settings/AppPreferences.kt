@@ -117,6 +117,16 @@ object AppPreferences {
         prefs(context).edit { putBoolean(KEY_NIGHT_MODE_ENABLED, enabled) }
     }
 
+    // --- Auto Focus ---
+    private const val KEY_AUTO_FOCUS_ENABLED = "auto_focus_enabled"
+
+    fun getAutoFocusEnabled(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_AUTO_FOCUS_ENABLED, true)
+
+    fun setAutoFocusEnabled(context: Context, enabled: Boolean) {
+        prefs(context).edit { putBoolean(KEY_AUTO_FOCUS_ENABLED, enabled) }
+    }
+
     // --- Vertical Flip ---
     // For cameras mounted upside-down (e.g. hung from a ceiling bracket). Flips
     // preview, RTSP stream and dashboard snapshot together since all three render

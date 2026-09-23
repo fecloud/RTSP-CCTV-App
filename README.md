@@ -312,6 +312,7 @@ first) would.
 | `timestamp_position` | `Top Left` \| `Top Right` \| `Bottom Left` \| `Bottom Right` | Overlay corner |
 | `timestamp_size` | `Small` \| `Medium` \| `Large` | Overlay text size |
 | `flashlight_enabled` | bool | Torch |
+| `auto_focus_enabled` | bool | Continuous auto focus (off locks focus at its current position) |
 | `night_mode_enabled` | bool | Automatic torch by ambient light |
 | `vertical_flip_enabled` | bool | Flip stream/preview for an upside-down mount |
 | `zoom_level` | float 1.0–8.0 | Camera digital zoom factor |

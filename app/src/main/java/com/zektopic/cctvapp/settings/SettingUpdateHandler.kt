@@ -30,6 +30,8 @@ class SettingUpdateHandler(private val context: Context) {
                 ServiceStateRepository.updateSettings(context) { it.copy(timestampSize = value) }
             "flashlight_enabled" ->
                 ServiceStateRepository.updateSettings(context) { it.copy(flashlightEnabled = value.toBoolean()) }
+            "auto_focus_enabled" ->
+                ServiceStateRepository.updateSettings(context) { it.copy(autoFocusEnabled = value.toBoolean()) }
             "night_mode_enabled" ->
                 ServiceStateRepository.updateSettings(context) { it.copy(nightModeEnabled = value.toBoolean()) }
             "vertical_flip_enabled" ->

@@ -199,6 +199,7 @@ class CctvServerService : Service(), ConnectChecker {
                 }
                 if (first || prev.flashlightEnabled != curr.flashlightEnabled) applyFlashlight()
                 if (first || prev.nightModeEnabled != curr.nightModeEnabled) updateNightModeSensor()
+                if (first || prev.autoFocusEnabled != curr.autoFocusEnabled) applyFocus()
                 if (first || prev.verticalFlipEnabled != curr.verticalFlipEnabled) applyVerticalFlip()
                 if (first || prev.zoomLevel != curr.zoomLevel) applyZoom()
                 if (first || prev.bitrateKbps != curr.bitrateKbps) applyBitrate()
@@ -387,6 +388,7 @@ class CctvServerService : Service(), ConnectChecker {
                     applyTimestampOverlay()
                     applyVerticalFlip()
                     applyFlashlight()
+                    applyFocus()
                     applyZoom()
                     publishStreamingStatus(stream.camera2Source, activeCodec = activeCodec)
                     recordingManager.startIfNeeded()
@@ -530,6 +532,22 @@ class CctvServerService : Service(), ConnectChecker {
             }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to toggle flashlight", e)
+        }
+    }
+
+    private fun applyFocus() {
+        if (sharedStream?.isStreaming != true) return
+        val source = sharedStream?.camera2Source ?: return
+        try {
+            if (settings.autoFocusEnabled) {
+                source.enableAutoFocus()
+                Log.d(TAG, "Auto focus ON")
+            } else {
+                source.disableAutoFocus()
+                Log.d(TAG, "Auto focus OFF")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to toggle auto focus", e)
         }
     }
 

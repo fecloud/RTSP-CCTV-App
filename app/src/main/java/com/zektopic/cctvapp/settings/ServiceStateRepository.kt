@@ -76,6 +76,7 @@ object ServiceStateRepository {
         AppPreferences.setTimestampSize(context, s.timestampSize)
         AppPreferences.setFlashlightEnabled(context, s.flashlightEnabled)
         AppPreferences.setNightModeEnabled(context, s.nightModeEnabled)
+        AppPreferences.setAutoFocusEnabled(context, s.autoFocusEnabled)
         AppPreferences.setVerticalFlipEnabled(context, s.verticalFlipEnabled)
         AppPreferences.setZoomLevel(context, s.zoomLevel)
         AppPreferences.setBitrateKbps(context, s.bitrateKbps)

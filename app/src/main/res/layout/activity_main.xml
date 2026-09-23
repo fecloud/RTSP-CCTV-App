@@ -147,6 +147,15 @@
                     android:text="@string/vertical_flip_toggle"
                     android:textAppearance="@style/TextAppearance.Material3.BodyLarge" />
 
+                <!-- Auto Focus Toggle -->
+                <com.google.android.material.materialswitch.MaterialSwitch
+                    android:id="@+id/switch_auto_focus"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:text="@string/auto_focus_toggle"
+                    android:textAppearance="@style/TextAppearance.Material3.BodyLarge" />
+
                 <!-- Zoom -->
                 <TextView
                     android:id="@+id/label_zoom_level"
