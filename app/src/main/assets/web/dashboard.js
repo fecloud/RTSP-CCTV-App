@@ -103,11 +103,13 @@ function fetchStatus() {
 
             if (data.streaming) {
                 badge.className = 'status-badge live';
+                badge.title = 'LIVE';
                 statusText.textContent = 'LIVE';
                 btnStream.className = 'btn danger';
                 btnStreamText.textContent = 'Stop';
             } else {
                 badge.className = 'status-badge offline';
+                badge.title = 'OFFLINE';
                 statusText.textContent = 'OFFLINE';
                 btnStream.className = 'btn primary';
                 btnStreamText.textContent = 'Start';
