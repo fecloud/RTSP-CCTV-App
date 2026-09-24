@@ -35,7 +35,7 @@
 
     <!-- Overlay strings -->
     <string name="section_overlay">Overlay</string>
-    <string name="show_timestamp">Show Date &amp; Time</string>
+    <string name="show_system_info">Show System Info</string>
     <string name="overlay_position">Overlay Position</string>
     <string name="overlay_size">Text Size</string>
 

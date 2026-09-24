@@ -67,7 +67,8 @@ NVR can consume, and keeps every frame on your own network.
 - **Web dashboard** on port `8081` — live preview, every setting, battery and Wi-Fi status
 
 ### Overlays and camera control
-- Timestamp and date overlay, positionable in any corner, three text sizes
+- Timestamp overlay (always on) with an optional battery/CPU temperature readout,
+  positionable in any corner, three text sizes
 - Torch control, plus a **night mode** that switches the torch on automatically using the
   ambient light sensor
 - Digital zoom control via slider, in both the app and the web dashboard
@@ -308,9 +309,9 @@ first) would.
 
 | Key | Type | Meaning |
 |---|---|---|
-| `show_timestamp` | bool | Date &amp; time overlay |
-| `timestamp_position` | `Top Left` \| `Top Right` \| `Bottom Left` \| `Bottom Right` | Overlay corner |
-| `timestamp_size` | `Small` \| `Medium` \| `Large` | Overlay text size |
+| `show_system_info` | bool | System info (battery %/temp, CPU temp) in the overlay; the clock itself always shows |
+| `overlay_position` | `Top Left` \| `Top Right` \| `Bottom Left` \| `Bottom Right` | Overlay corner |
+| `overlay_size` | `Small` \| `Medium` \| `Large` | Overlay text size |
 | `flashlight_enabled` | bool | Torch |
 | `auto_focus_enabled` | bool | Continuous auto focus (off locks focus at its current position) |
 | `night_mode_enabled` | bool | Automatic torch by ambient light |

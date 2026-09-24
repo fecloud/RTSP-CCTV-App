@@ -71,32 +71,33 @@ object AppPreferences {
     }
 
     // --- Timestamp Overlay ---
-    // A single switch now controls the whole overlay (date+time together) --
-    // it used to be two independent switches (KEY_SHOW_DATE was the other).
-    private const val KEY_SHOW_TIMESTAMP = "show_timestamp"
-    private const val KEY_TIMESTAMP_POSITION = "timestamp_position"
+    // The clock itself is always shown; this switch only controls whether the
+    // battery/CPU temperature system-info is appended to it -- it used to gate the
+    // whole overlay (KEY_SHOW_DATE was an even older, separate switch for the date part).
+    private const val KEY_SHOW_SYSTEM_INFO = "show_system_info"
+    private const val KEY_OVERLAY_POSITION = "overlay_position"
 
-    fun getShowTimestamp(context: Context): Boolean =
-        prefs(context).getBoolean(KEY_SHOW_TIMESTAMP, true)
+    fun getShowSystemInfo(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_SHOW_SYSTEM_INFO, true)
 
-    fun setShowTimestamp(context: Context, show: Boolean) {
-        prefs(context).edit { putBoolean(KEY_SHOW_TIMESTAMP, show) }
+    fun setShowSystemInfo(context: Context, show: Boolean) {
+        prefs(context).edit { putBoolean(KEY_SHOW_SYSTEM_INFO, show) }
     }
 
-    fun getTimestampPosition(context: Context): String =
-        prefs(context).getString(KEY_TIMESTAMP_POSITION, "Top Left") ?: "Top Left"
+    fun getOverlayPosition(context: Context): String =
+        prefs(context).getString(KEY_OVERLAY_POSITION, "Top Left") ?: "Top Left"
 
-    fun setTimestampPosition(context: Context, position: String) {
-        prefs(context).edit { putString(KEY_TIMESTAMP_POSITION, position) }
+    fun setOverlayPosition(context: Context, position: String) {
+        prefs(context).edit { putString(KEY_OVERLAY_POSITION, position) }
     }
 
-    private const val KEY_TIMESTAMP_SIZE = "timestamp_size"
+    private const val KEY_OVERLAY_SIZE = "overlay_size"
 
-    fun getTimestampSize(context: Context): String =
-        prefs(context).getString(KEY_TIMESTAMP_SIZE, "Large") ?: "Large"
+    fun getOverlaySize(context: Context): String =
+        prefs(context).getString(KEY_OVERLAY_SIZE, "Large") ?: "Large"
 
-    fun setTimestampSize(context: Context, size: String) {
-        prefs(context).edit { putString(KEY_TIMESTAMP_SIZE, size) }
+    fun setOverlaySize(context: Context, size: String) {
+        prefs(context).edit { putString(KEY_OVERLAY_SIZE, size) }
     }
 
     // --- Flashlight & Night Mode ---

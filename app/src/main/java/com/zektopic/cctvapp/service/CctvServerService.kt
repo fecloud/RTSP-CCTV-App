@@ -192,8 +192,8 @@ class CctvServerService : Service(), ConnectChecker {
                 previous = curr
                 val first = prev == null
 
-                if (first || prev.showTimestamp != curr.showTimestamp ||
-                    prev.timestampPosition != curr.timestampPosition || prev.timestampSize != curr.timestampSize
+                if (first || prev.showSystemInfo != curr.showSystemInfo ||
+                    prev.overlayPosition != curr.overlayPosition || prev.overlaySize != curr.overlaySize
                 ) {
                     applyTimestampOverlay()
                 }
@@ -416,12 +416,6 @@ class CctvServerService : Service(), ConnectChecker {
     }
 
     private fun applyTimestampOverlay() {
-        if (!settings.showTimestamp) {
-            stopTimestampTicker()
-            textFilter = null
-            return
-        }
-
         try {
             val filter = TextFilterRender()
             sharedStream?.getGlInterface()?.setFilter(filter)
@@ -434,12 +428,24 @@ class CctvServerService : Service(), ConnectChecker {
             // tick reads one in the background and fills it in.
             filter.setText(buildTimestampString(cpuTempCelsius = null), fontSize, Color.WHITE, Typeface.DEFAULT_BOLD)
 
-            val scaleW = when (settings.timestampSize) {
-                "Small" -> 14f
-                "Large" -> 26f
-                else -> 19f
+            // Box width has to match content: with system info off, the overlay is just
+            // the clock (much shorter than clock+battery+CPU temp), so a box sized for the
+            // long case leaves a stale gap of empty space at the anchored edge (or, for the
+            // Right positions, an incorrectly far-left anchor) once system info is toggled off.
+            val scaleW = if (settings.showSystemInfo) {
+                when (settings.overlaySize) {
+                    "Small" -> 14f
+                    "Large" -> 26f
+                    else -> 19f
+                }
+            } else {
+                when (settings.overlaySize) {
+                    "Small" -> 8f
+                    "Large" -> 15f
+                    else -> 11f
+                }
             }
-            val scaleH = when (settings.timestampSize) {
+            val scaleH = when (settings.overlaySize) {
                 "Small" -> 2.5f
                 "Large" -> 5f
                 else -> 3.5f
@@ -451,7 +457,7 @@ class CctvServerService : Service(), ConnectChecker {
             // or they drift away from that edge (or, at the old scale, past it
             // entirely). Margin matches the left/top inset used below.
             val margin = 2f
-            when (settings.timestampPosition) {
+            when (settings.overlayPosition) {
                 "Top Left" -> filter.setPosition(margin, margin)
                 "Top Right" -> filter.setPosition(100f - scaleW - margin, margin)
                 "Bottom Left" -> filter.setPosition(margin, 100f - scaleH - margin)
@@ -460,7 +466,7 @@ class CctvServerService : Service(), ConnectChecker {
 
             textFilter = filter
             startTimestampTicker()
-            Log.d(TAG, "Timestamp overlay applied at ${settings.timestampPosition}, size=${settings.timestampSize}")
+            Log.d(TAG, "Timestamp overlay applied at ${settings.overlayPosition}, size=${settings.overlaySize}")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to apply timestamp overlay", e)
         }
@@ -468,7 +474,6 @@ class CctvServerService : Service(), ConnectChecker {
 
     private fun updateTimestampText(cpuTempCelsius: Float?) {
         val filter = textFilter ?: return
-        if (!settings.showTimestamp) return
         try {
             filter.setText(buildTimestampString(cpuTempCelsius), getOverlayFontSize(), Color.WHITE, Typeface.DEFAULT_BOLD)
         } catch (e: Exception) {
@@ -478,7 +483,7 @@ class CctvServerService : Service(), ConnectChecker {
     }
 
     private fun getOverlayFontSize(): Float {
-        return when (settings.timestampSize) {
+        return when (settings.overlaySize) {
             "Small" -> 16f
             "Large" -> 30f
             else -> 22f  // Medium
@@ -496,20 +501,22 @@ class CctvServerService : Service(), ConnectChecker {
     private fun buildTimestampString(cpuTempCelsius: Float?): String {
         val now = Date()
         val parts = mutableListOf<String>()
-        if (settings.showTimestamp) {
-            parts.add(timestampFormat.format(now))
-        }
-        val batteryLevel = DeviceStatsUtil.getBatteryLevel(this)
-        if (batteryLevel >= 0) {
-            // Battery temp rides in the same part as the charge level (no separate
-            // "BATT" label) -- position alone makes the grouping obvious, and every
-            // character here was making the fixed-width overlay box more cramped.
-            val batteryTemp = DeviceStatsUtil.getBatteryTemperatureCelsius(this)
-                ?.let { " %.0f°C".format(Locale.getDefault(), it) } ?: ""
-            parts.add("$batteryLevel%$batteryTemp")
-        }
-        cpuTempCelsius?.let { temp ->
-            parts.add("%.0f°C".format(Locale.getDefault(), temp))
+        // The clock is always shown; showSystemInfo only gates the system-info
+        // (battery/CPU temp) parts below.
+        parts.add(timestampFormat.format(now))
+        if (settings.showSystemInfo) {
+            val batteryLevel = DeviceStatsUtil.getBatteryLevel(this)
+            if (batteryLevel >= 0) {
+                // Battery temp rides in the same part as the charge level (no separate
+                // "BATT" label) -- position alone makes the grouping obvious, and every
+                // character here was making the fixed-width overlay box more cramped.
+                val batteryTemp = DeviceStatsUtil.getBatteryTemperatureCelsius(this)
+                    ?.let { " %.0f°C".format(Locale.getDefault(), it) } ?: ""
+                parts.add("$batteryLevel%$batteryTemp")
+            }
+            cpuTempCelsius?.let { temp ->
+                parts.add("%.0f°C".format(Locale.getDefault(), temp))
+            }
         }
         return parts.joinToString(" ")
     }

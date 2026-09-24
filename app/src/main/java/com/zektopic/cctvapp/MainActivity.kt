@@ -165,12 +165,12 @@ class MainActivity : AppCompatActivity() {
         setAuthFieldsEnabled(s.authEnabled)
 
         // Load saved overlay settings
-        binding.switchTimestamp.isChecked = s.showTimestamp
+        binding.switchSystemInfo.isChecked = s.showSystemInfo
         binding.spinnerOverlayPosition.setText(
-            if (s.timestampPosition in overlayPositions) s.timestampPosition else overlayPositions.first(), false
+            if (s.overlayPosition in overlayPositions) s.overlayPosition else overlayPositions.first(), false
         )
         binding.spinnerOverlaySize.setText(
-            if (s.timestampSize in overlaySizes) s.timestampSize else overlaySizes[1], false
+            if (s.overlaySize in overlaySizes) s.overlaySize else overlaySizes[1], false
         )
 
         // Load saved flashlight & night mode settings
@@ -268,16 +268,16 @@ class MainActivity : AppCompatActivity() {
         }
 
         // Overlay listeners
-        binding.switchTimestamp.setOnCheckedChangeListener { _, isChecked ->
-            ServiceStateRepository.updateSettings(this) { it.copy(showTimestamp = isChecked) }
+        binding.switchSystemInfo.setOnCheckedChangeListener { _, isChecked ->
+            ServiceStateRepository.updateSettings(this) { it.copy(showSystemInfo = isChecked) }
         }
 
         binding.spinnerOverlayPosition.setOnItemClickListener { _, _, position, _ ->
-            ServiceStateRepository.updateSettings(this) { it.copy(timestampPosition = overlayPositions[position]) }
+            ServiceStateRepository.updateSettings(this) { it.copy(overlayPosition = overlayPositions[position]) }
         }
 
         binding.spinnerOverlaySize.setOnItemClickListener { _, _, position, _ ->
-            ServiceStateRepository.updateSettings(this) { it.copy(timestampSize = overlaySizes[position]) }
+            ServiceStateRepository.updateSettings(this) { it.copy(overlaySize = overlaySizes[position]) }
         }
 
         // Copy buttons

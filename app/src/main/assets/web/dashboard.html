@@ -396,6 +396,7 @@
                 <div style="display:flex; align-items:center; gap:4px; font-size:13px; font-weight:600; color:var(--text-secondary);" title="Battery" id="batteryBadge">
                     <svg viewBox="0 0 24 24" style="width:16px; height:16px; fill:currentColor;"><path id="batteryIconPath" fill-rule="evenodd" d="M15.67 4H14V2h-4v2H8.33C7.6 4 7 4.6 7 5.33v15.33C7 21.4 7.6 22 8.33 22h7.33c.74 0 1.34-.6 1.34-1.33V5.33C17 4.6 16.4 4 15.67 4z"/></svg>
                     <span id="batteryText">—%</span>
+                    <span id="batteryTempText" style="opacity:0.75;">(—°C)</span>
                 </div>
                 <div style="display:flex; align-items:center; gap:4px; font-size:13px; font-weight:600; color:var(--text-secondary);" title="WiFi Signal">
                     <svg viewBox="0 0 24 24" style="width:16px; height:16px; fill:currentColor;"><path d="M12.01 21.49L23.64 7c-.45-.34-4.93-4-11.64-4C5.28 3 .81 6.66.36 7l11.63 14.49.01.01.01-.01z"/></svg>
@@ -533,16 +534,19 @@
         <div class="settings-card">
             <h3>Overlay</h3>
             <div class="setting-row">
-                <span class="setting-label">Show Date &amp; Time</span>
+                <div>
+                    <span class="setting-label">Show System Info</span>
+                    <div class="setting-sublabel">Battery &amp; CPU temperature; clock is always shown</div>
+                </div>
                 <label class="toggle">
-                    <input type="checkbox" id="toggleTimestamp" onchange="setSetting('show_timestamp', this.checked)">
+                    <input type="checkbox" id="toggleSystemInfo" onchange="setSetting('show_system_info', this.checked)">
                     <span class="toggle-track"></span>
                 </label>
             </div>
             <div class="setting-row">
                 <span class="setting-label">Position</span>
                 <div class="select-wrap">
-                    <select id="posSelect" onchange="setSetting('timestamp_position', this.value)">
+                    <select id="posSelect" onchange="setSetting('overlay_position', this.value)">
                         <option value="Top Left">Top Left</option>
                         <option value="Top Right">Top Right</option>
                         <option value="Bottom Left">Bottom Left</option>
@@ -553,7 +557,7 @@
             <div class="setting-row">
                 <span class="setting-label">Text Size</span>
                 <div class="select-wrap">
-                    <select id="sizeSelect" onchange="setSetting('timestamp_size', this.value)">
+                    <select id="sizeSelect" onchange="setSetting('overlay_size', this.value)">
                         <option value="Small">Small</option>
                         <option value="Medium">Medium</option>
                         <option value="Large">Large</option>

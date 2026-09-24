@@ -85,12 +85,16 @@ function fetchStatus() {
             const chipRes = document.getElementById('chipRes');
             const batteryBadge = document.getElementById('batteryBadge');
             const batteryText = document.getElementById('batteryText');
+            const batteryTempText = document.getElementById('batteryTempText');
             const batteryIconPath = document.getElementById('batteryIconPath');
             const wifiText = document.getElementById('wifiText');
             const cpuTempText = document.getElementById('cpuTempText');
             const uptimeText = document.getElementById('uptimeText');
 
             if (data.batteryLevel >= 0) batteryText.textContent = data.batteryLevel + '%';
+            if (data.batteryTempCelsius !== null && data.batteryTempCelsius !== undefined) {
+                batteryTempText.textContent = '(' + data.batteryTempCelsius.toFixed(1) + '°C)';
+            }
             batteryIconPath.setAttribute('d', data.isCharging === true ? BATTERY_PATH_CHARGING : BATTERY_PATH_PLAIN);
             batteryBadge.title = data.isCharging === true ? 'Battery (Charging)' : 'Battery';
             if (data.wifiStrength >= 0) wifiText.textContent = data.wifiStrength + '%';
@@ -124,9 +128,9 @@ function fetchStatus() {
             document.getElementById('resSelect').value = data.resolution;
 
             // Sync toggles
-            document.getElementById('toggleTimestamp').checked = data.showTimestamp;
-            document.getElementById('posSelect').value = data.timestampPosition;
-            document.getElementById('sizeSelect').value = data.timestampSize;
+            document.getElementById('toggleSystemInfo').checked = data.showSystemInfo;
+            document.getElementById('posSelect').value = data.overlayPosition;
+            document.getElementById('sizeSelect').value = data.overlaySize;
             document.getElementById('toggleFlashlight').checked = data.flashlightEnabled;
             document.getElementById('toggleAutoFocus').checked = data.autoFocusEnabled;
             document.getElementById('toggleNightMode').checked = data.nightModeEnabled;

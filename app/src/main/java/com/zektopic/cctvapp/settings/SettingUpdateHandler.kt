@@ -22,12 +22,12 @@ class SettingUpdateHandler(private val context: Context) {
         when (key) {
             "video_codec" ->
                 ServiceStateRepository.updateSettings(context) { it.copy(videoCodec = value) }
-            "show_timestamp" ->
-                ServiceStateRepository.updateSettings(context) { it.copy(showTimestamp = value.toBoolean()) }
-            "timestamp_position" ->
-                ServiceStateRepository.updateSettings(context) { it.copy(timestampPosition = value) }
-            "timestamp_size" ->
-                ServiceStateRepository.updateSettings(context) { it.copy(timestampSize = value) }
+            "show_system_info" ->
+                ServiceStateRepository.updateSettings(context) { it.copy(showSystemInfo = value.toBoolean()) }
+            "overlay_position" ->
+                ServiceStateRepository.updateSettings(context) { it.copy(overlayPosition = value) }
+            "overlay_size" ->
+                ServiceStateRepository.updateSettings(context) { it.copy(overlaySize = value) }
             "flashlight_enabled" ->
                 ServiceStateRepository.updateSettings(context) { it.copy(flashlightEnabled = value.toBoolean()) }
             "auto_focus_enabled" ->

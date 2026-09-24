@@ -439,12 +439,12 @@
                     android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
                     android:textColor="?attr/colorPrimary" />
 
-                <!-- Show Timestamp Toggle -->
+                <!-- Show System Info Toggle -->
                 <com.google.android.material.materialswitch.MaterialSwitch
-                    android:id="@+id/switch_timestamp"
+                    android:id="@+id/switch_system_info"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="@string/show_timestamp"
+                    android:text="@string/show_system_info"
                     android:textAppearance="@style/TextAppearance.Material3.BodyLarge" />
 
                 <!-- Overlay Position Dropdown -->
