@@ -28,8 +28,9 @@ import org.webrtc.SessionDescription
  * for every `/webrtc-ws` connection. Pure JSON signaling relay: the browser always initiates
  * with an SDP offer built from a `recvonly` video transceiver (see `webrtc-preview.js`); this
  * replies with an answer built from [WebRtcPreviewBridge]'s shared video track, then relays ICE
- * candidates both ways. LAN-only by design (`PeerConnection.RTCConfiguration(emptyList())` in
- * [WebRtcPreviewBridge.attachViewer] -- no STUN/TURN), so a host candidate is always enough.
+ * candidates both ways. [WebRtcPreviewBridge.attachViewer] configures STUN/TURN servers (see its
+ * `ICE_SERVERS`), so candidates may include server-reflexive/relay addresses in addition to host
+ * candidates.
  *
  * [authorized] is decided in `openWebSocket()` from the handshake headers -- NanoWSD always
  * completes the 101 handshake regardless, so an unauthorized connection is closed in [onOpen],
