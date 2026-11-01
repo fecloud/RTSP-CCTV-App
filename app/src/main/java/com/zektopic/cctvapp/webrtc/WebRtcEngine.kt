@@ -7,9 +7,12 @@ import com.zektopic.cctvapp.log.AppLog as Log
 import com.zektopic.cctvapp.settings.ServiceStateRepository
 import com.zektopic.cctvapp.streaming.SharedCameraStream
 import java.util.concurrent.atomic.AtomicBoolean
+import org.webrtc.AudioSource
+import org.webrtc.AudioTrack
 import org.webrtc.DefaultVideoDecoderFactory
 import org.webrtc.EglBase
 import org.webrtc.HardwareVideoEncoderFactory
+import org.webrtc.MediaConstraints
 import org.webrtc.PeerConnectionFactory
 import org.webrtc.SurfaceTextureHelper
 import org.webrtc.VideoCodecInfo
@@ -17,6 +20,7 @@ import org.webrtc.VideoEncoder
 import org.webrtc.VideoEncoderFactory
 import org.webrtc.VideoSource
 import org.webrtc.VideoTrack
+import org.webrtc.audio.JavaAudioDeviceModule
 
 /**
  * Owns the actual WebRTC resources for exactly one [WebRtcPreviewBridge] "at least one viewer
@@ -26,31 +30,41 @@ import org.webrtc.VideoTrack
  * last one disconnects -- never reused across that span, since starting one does real,
  * non-idempotent work (allocates a `Surface`, registers it with `GlStreamInterface`).
  *
- * Deliberately video-only: this app never creates a WebRTC audio track/`AudioSource` at all --
- * see [WebRtcPreviewBridge]'s kdoc for why (this device's mic hardware only tolerates one
- * concurrent `AudioRecord`, and WebRTC's Java SDK has no way to feed a send track from anything
- * other than its own `AudioDeviceModule`-owned `AudioRecord` -- confirmed on-device: wiring
+ * Carries a real WebRTC audio track, fed by [WebRtcMicFeed] rather than a second
+ * `android.media.AudioRecord` -- this app's target hardware's `AudioPolicyManager` only tolerates
+ * one concurrent `AudioRecord` session, and RootEncoder's own `MicrophoneSource` already holds it.
+ * The `JavaAudioDeviceModule` built in [init] uses a locally-patched
+ * `org.webrtc.audio.WebRtcAudioRecord` (see `webrtc-audio-patch/org/webrtc/audio/
+ * WebRtcAudioRecord.java`'s header comment) that never opens an `AudioRecord` at all; every
+ * `@CalledByNative` method it exposes keeps its original signature, so this is a source-level
+ * replacement of one class, not a hook -- confirmed necessary on-device: wiring
  * `JavaAudioDeviceModule.Builder.setSamplesReadyCallback`/`AudioRecordStateCallback` and manually
- * invoking the stored callback with externally-sourced PCM does not feed WebRTC's encoder or stop
- * `WebRtcAudioRecord`'s own independent `AudioRecord.startRecording()` attempt -- that callback
- * fires only as a passive notification *after* a real capture already succeeded, per its own
- * javadoc: "This should only be set for debug purposes"). Audio instead rides a `RTCDataChannel`
- * relaying RootEncoder's own mic capture, entirely outside this class.
+ * invoking the stored callback with externally-sourced PCM does *not* feed WebRTC's encoder or
+ * stop the stock `WebRtcAudioRecord`'s own independent `AudioRecord.startRecording()` attempt --
+ * that callback fires only as a passive notification *after* a real capture already succeeded,
+ * per its own javadoc: "This should only be set for debug purposes".
  */
 class WebRtcEngine(context: Context, private val stream: SharedCameraStream) {
 
     private companion object {
         private const val TAG = "WebRtcEngine"
         private const val VIDEO_TRACK_ID = "cctv-video"
+        private const val AUDIO_TRACK_ID = "cctv-audio"
+
+        /** Must match `CctvServerService`'s `stream.prepareAudio(sampleRate = 16000, isStereo = false, ...)` -- see [WebRtcMicFeed]'s kdoc for why this three-way agreement matters. */
+        private const val AUDIO_SAMPLE_RATE_HZ = 16000
     }
 
     val factory: PeerConnectionFactory
     val videoTrack: VideoTrack
+    val audioTrack: AudioTrack
 
     private val eglBase: EglBase
     private val surfaceTextureHelper: SurfaceTextureHelper
     private val previewSurface: Surface
     private val videoSource: VideoSource
+    private val audioDeviceModule: JavaAudioDeviceModule
+    private val audioSource: AudioSource
 
     init {
         Log.d(TAG, "Starting engine")
@@ -62,6 +76,18 @@ class WebRtcEngine(context: Context, private val stream: SharedCameraStream) {
         val base = EglBase.create()
         eglBase = base
 
+        val adm = JavaAudioDeviceModule.builder(context)
+            .setInputSampleRate(AUDIO_SAMPLE_RATE_HZ)
+            .setUseStereoInput(false)
+            // Neither flag can do anything useful here: both require a real
+            // android.media.audiofx.AudioEffect session tied to a real AudioRecord's session ID,
+            // and the patched WebRtcAudioRecord this app ships never has one -- see
+            // webrtc-audio-patch/org/webrtc/audio/WebRtcAudioRecord.java's header comment.
+            .setUseHardwareAcousticEchoCanceler(false)
+            .setUseHardwareNoiseSuppressor(false)
+            .createAudioDeviceModule()
+        audioDeviceModule = adm
+
         factory = PeerConnectionFactory.builder()
             .setOptions(
                 PeerConnectionFactory.Options().apply {
@@ -71,12 +97,7 @@ class WebRtcEngine(context: Context, private val stream: SharedCameraStream) {
                     disableNetworkMonitor = true
                 }
             )
-            // No .setAudioDeviceModule(...) -- PeerConnectionFactory.Builder auto-creates a
-            // default one internally when none is set (confirmed in its source), and since this
-            // app never creates an audio source/track from this factory, that default ADM's
-            // AudioRecord is never started. Explicitly building one here would be pointless and
-            // would invite someone to "helpfully" wire it into an audio track later, recreating
-            // the mic-contention crash this design avoids.
+            .setAudioDeviceModule(adm)
             .setVideoEncoderFactory(HardwareH26xVideoEncoderFactory(base.eglBaseContext))
             // This app never receives video (the browser's transceiver is recvonly), so this
             // looked safe to leave unset -- it isn't. Leaving it null crashes the whole process
@@ -115,6 +136,10 @@ class WebRtcEngine(context: Context, private val stream: SharedCameraStream) {
         }
         videoTrack = factory.createVideoTrack(VIDEO_TRACK_ID, source)
 
+        val micSource = factory.createAudioSource(MediaConstraints())
+        audioSource = micSource
+        audioTrack = factory.createAudioTrack(AUDIO_TRACK_ID, micSource)
+
         // Defaults (width/height 0, isPortrait false) match the primary encoder surface's own
         // GlStreamInterface config in SharedCameraStream.prepareVideo (always called with
         // rotation=0, so isPortrait ends up false there too) -- the camera texture is already
@@ -139,7 +164,10 @@ class WebRtcEngine(context: Context, private val stream: SharedCameraStream) {
         surfaceTextureHelper.dispose()
         videoTrack.dispose()
         videoSource.dispose()
+        audioTrack.dispose()
+        audioSource.dispose()
         factory.dispose()
+        audioDeviceModule.release()
         eglBase.release()
     }
 }

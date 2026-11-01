@@ -30,6 +30,7 @@ import com.zektopic.cctvapp.settings.ServiceStateRepository
 import com.zektopic.cctvapp.audio.AudioStreamBridge
 import com.zektopic.cctvapp.mse.MseVideoBridge
 import com.zektopic.cctvapp.streaming.SharedCameraStream
+import com.zektopic.cctvapp.webrtc.WebRtcMicFeed
 import com.zektopic.cctvapp.webrtc.WebRtcPreviewBridge
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -403,8 +404,17 @@ class CctvServerService : Service(), ConnectChecker {
                     // WebRtcPreviewBridge's kdoc) rather than the encoded bitstream, so it
                     // works regardless of which codec RTSP is using.
                     ensureWebRtcBridge().onStreamStarted(stream)
-                    // Audio doesn't care which video codec/transport is active either -- see
-                    // AudioStreamBridge's kdoc.
+                    // Feeds WebRtcEngine's real audio track (see its kdoc) -- independent of
+                    // ensureWebRtcBridge() above, since a WebRtcEngine isn't created until the
+                    // first viewer attaches, but WebRtcMicFeed needs to be subscribed as soon as
+                    // the stream exists so it's already wired by the time one does.
+                    WebRtcMicFeed.onStreamStarted(stream)
+                    // TODO(audio-migration): AudioStreamBridge's WebSocket PCM relay is being
+                    // replaced by WebRtcMicFeed above -- kept running in parallel until the new
+                    // path is verified on-device (real audio in WebRTC mode, no JNI crashes from
+                    // the patched WebRtcAudioRecord), then this line and AudioStreamBridge itself
+                    // should be deleted. Audio doesn't care which video codec/transport is active
+                    // either -- see AudioStreamBridge's kdoc.
                     ensureAudioBridge().onStreamStarted(stream)
                 } else {
                     Log.e(TAG, "H264 fallback preparation also failed.")
@@ -641,6 +651,7 @@ class CctvServerService : Service(), ConnectChecker {
         webRtcBridge?.release()
         webRtcBridge = null
         PreviewBus.webRtcBridge.set(null)
+        WebRtcMicFeed.release()
         audioBridge?.release()
         audioBridge = null
         PreviewBus.audioBridge.set(null)

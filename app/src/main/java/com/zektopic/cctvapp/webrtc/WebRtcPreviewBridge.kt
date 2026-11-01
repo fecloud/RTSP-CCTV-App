@@ -21,8 +21,12 @@ import org.webrtc.PeerConnection
  * `MicrophoneSource` is already recording).
  *
  * This class does viewer bookkeeping (reference counting, [PeerConnection] creation per viewer)
- * -- the actual engine resources (factory, video track, GL preview surface) live in
+ * -- the actual engine resources (factory, video track, audio track, GL preview surface) live in
  * [WebRtcEngine], created/torn down here as the viewer count goes 0->1/1->0.
+ *
+ * Carries audio as well as video, both as real WebRTC tracks on the same [PeerConnection] -- see
+ * [WebRtcEngine]'s kdoc for how [WebRtcEngine.audioTrack] gets its PCM without a second
+ * `android.media.AudioRecord`.
  */
 class WebRtcPreviewBridge(private val context: Context) {
 
@@ -71,6 +75,7 @@ class WebRtcPreviewBridge(private val context: Context) {
         }
         val pc = activeEngine.factory.createPeerConnection(rtcConfig, observer) ?: return null
         pc.addTrack(activeEngine.videoTrack, listOf(STREAM_ID))
+        pc.addTrack(activeEngine.audioTrack, listOf(STREAM_ID))
         viewerCount++
         return pc
     }

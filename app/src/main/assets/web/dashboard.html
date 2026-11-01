@@ -416,16 +416,19 @@
         <!-- Preview -->
         <div class="preview-card">
             <div class="preview-wrapper">
-                <!-- muted so autoplay is never blocked by browser policy -- this element never
-                     carries an audio track in either preview mode (audio is a separate, shared
-                     preview, see audio-preview.js), so chipAudioMute is the only volume control. -->
+                <!-- muted so autoplay is never blocked by browser policy -- see webrtc-preview.js's
+                     kdoc on that `video.muted = true` line for why there's no custom chip/JS trying
+                     to auto-restore an unmuted preference instead: the native controls' own volume
+                     button is a real user gesture (this one isn't subject to the same block) and is
+                     simpler than the fragile dance that used to live here (see git history). Only
+                     the WebRTC preview mode ever attaches an audio track to this element at all --
+                     see webrtc-preview.js's kdoc for why MSE mode has no audio. -->
                 <video id="cam-preview" autoplay muted playsinline controls></video>
                 <div class="preview-overlay">
                     <span class="chip" id="chipPreviewType" style="cursor:pointer;"></span>
                     <span class="chip" id="chipRec" style="display:none;color:var(--danger);">● REC</span>
                     <span class="chip" id="chipCodec">—</span>
                     <span class="chip" id="chipRes">—</span>
-                    <span class="chip" id="chipAudioMute" style="cursor:pointer;" onclick="toggleAudioMute()">🔇</span>
                 </div>
             </div>
             <div class="controls">
@@ -654,7 +657,6 @@
     <script src="/h264-converter.js"></script>
     <script src="/mse-preview.js"></script>
     <script src="/webrtc-preview.js"></script>
-    <script src="/audio-preview.js"></script>
     <script src="/dashboard.js"></script>
 </body>
 </html>

@@ -26,11 +26,11 @@ import org.webrtc.SessionDescription
 /**
  * One instance per browser tab -- created by [com.zektopic.cctvapp.web.WebServer.openWebSocket]
  * for every `/webrtc-ws` connection. Pure JSON signaling relay: the browser always initiates
- * with an SDP offer built from a `recvonly` video transceiver (see `webrtc-preview.js`); this
- * replies with an answer built from [WebRtcPreviewBridge]'s shared video track, then relays ICE
- * candidates both ways. [WebRtcPreviewBridge.attachViewer] configures STUN/TURN servers (see its
- * `ICE_SERVERS`), so candidates may include server-reflexive/relay addresses in addition to host
- * candidates.
+ * with an SDP offer built from `recvonly` video and audio transceivers (see `webrtc-preview.js`);
+ * this replies with an answer built from [WebRtcPreviewBridge]'s shared video and audio tracks,
+ * then relays ICE candidates both ways. [WebRtcPreviewBridge.attachViewer] configures STUN/TURN
+ * servers (see its `ICE_SERVERS`), so candidates may include server-reflexive/relay addresses in
+ * addition to host candidates.
  *
  * [authorized] is decided in `openWebSocket()` from the handshake headers -- NanoWSD always
  * completes the 101 handshake regardless, so an unauthorized connection is closed in [onOpen],

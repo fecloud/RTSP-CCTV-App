@@ -2,9 +2,9 @@
 // Wire format over /ws (see MseStreamSocket.kt): one text control message with the stream's fps,
 // then binary messages holding raw H.264 NALs straight off the encoder -- no server-side muxing.
 // `h264-converter.js` (vendored, same library ws-scrcpy's web client uses) builds the video fmp4
-// fragments and manages its own MediaSource/SourceBuffer. Video-only: audio is a separate, shared
-// preview independent of which video transport is active -- see audio-preview.js and
-// AudioStreamBridge.kt's kdoc for why.
+// fragments and manages its own MediaSource/SourceBuffer. Video-only, and MSE mode has no audio at
+// all -- audio only rides along with the WebRTC preview's real audio track (see webrtc-preview.js
+// and WebRtcEngine.kt's kdoc), an accepted tradeoff (see git history).
 //
 // The self-healing below (GOP-based buffer trimming, per-frame stall detection) is a
 // direct port of ws-scrcpy's own web client (src/app/player/MsePlayer.ts /
@@ -298,8 +298,9 @@ function startMsePreview() {
             // This used to be raised (first to 3, then 2) because audio shared this same
             // MediaSource's appendBuffer() budget, and the *combined* video+audio call rate was
             // what correlated with decoder stalls (checkForBadState's "no-decoded-frames" firing
-            // every 5-7s) -- see git history. Audio has its own separate preview now (see
-            // audio-preview.js), so this MediaSource only ever sees video's own append rate;
+            // every 5-7s) -- see git history. Audio no longer rides along with MSE at all now
+            // (see this file's header comment), so this MediaSource only ever sees video's own
+            // append rate;
             // confirmed via Chrome DevTools Protocol console capture (2 runs, 45s and 90s, zero
             // stall/bad-state log lines in either) that the original problem doesn't reproduce
             // at video-only load, so there's no reason to keep paying the batching latency.
@@ -312,8 +313,8 @@ function startMsePreview() {
             }, MSE_PREVIEW.HEARTBEAT_LOG_INTERVAL_MS);
             return;
         }
-        // Every binary message is a raw H.264 NAL (see MseStreamSocket.kt) -- no tag byte,
-        // audio is a separate preview (see audio-preview.js).
+        // Every binary message is a raw H.264 NAL (see MseStreamSocket.kt) -- no tag byte, this
+        // socket is video-only (see this file's header comment).
         const payload = new Uint8Array(event.data);
         inputTimestamps.push(Date.now());
         if (appendVideoFrame(payload)) {

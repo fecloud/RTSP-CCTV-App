@@ -1,10 +1,15 @@
 // --- WebRTC live preview (opt-in via the dashboard's preview-type chip, see dashboard.js) ---
 // Signaling over /webrtc-ws (see WebRtcSignalingSocket.kt): this side always initiates with an
-// SDP offer built from a recvonly video transceiver, the phone answers with its shared camera
-// track, and ICE candidates are relayed both ways as small JSON messages.
+// SDP offer built from recvonly video+audio transceivers, the phone answers with its shared
+// camera track and its real WebRTC audio track (see WebRtcEngine.kt's kdoc for how that audio
+// track gets its PCM without a second android.media.AudioRecord), and ICE candidates are relayed
+// both ways as small JSON messages.
 //
-// Video-only: audio is a separate, shared preview independent of which video transport is active
-// -- see audio-preview.js and AudioStreamBridge.kt's kdoc for why.
+// Audio only exists here, in WebRTC preview mode -- MSE mode (mse-preview.js) has no audio at all.
+// This used to be a separate, always-on preview (audio-preview.js, relaying raw PCM over its own
+// /audio-ws WebSocket) specifically so audio didn't care which video transport was active; now
+// that WebRTC carries a real audio track, riding it here is simpler, at the cost of MSE mode never
+// having sound (an accepted tradeoff, see git history for the rationale.)
 const WEBRTC_PREVIEW = {
     RECONNECT_DELAY_MS: 2000,
 };
@@ -31,9 +36,16 @@ const rtcConfiguration = {
 function startWebRtcPreview() {
     const video = document.getElementById('cam-preview');
     video.playbackRate = 1.0;
+    // Always starts muted -- required for autoplay to not be blocked (confirmed on-device: even
+    // unmuting already-playing media can still get the whole element paused in this environment,
+    // so there's no reliable way to auto-restore a "the user wants sound" preference across a
+    // reload without a real gesture). The user can unmute via the <video controls> element's own
+    // native volume control, which is a real gesture and isn't subject to this.
+    video.muted = true;
 
     const pc = new RTCPeerConnection(rtcConfiguration);
     pc.addTransceiver('video', { direction: 'recvonly' });
+    pc.addTransceiver('audio', { direction: 'recvonly' });
     pc.ontrack = (event) => {
         if (video.srcObject !== event.streams[0]) video.srcObject = event.streams[0];
     };
