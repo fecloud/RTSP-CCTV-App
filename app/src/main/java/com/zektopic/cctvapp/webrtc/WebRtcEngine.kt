@@ -136,7 +136,19 @@ class WebRtcEngine(context: Context, private val stream: SharedCameraStream) {
         }
         videoTrack = factory.createVideoTrack(VIDEO_TRACK_ID, source)
 
-        val micSource = factory.createAudioSource(MediaConstraints())
+        val micConstraints = MediaConstraints().apply {
+            // Software (not hardware -- see the two setUseHardware*(false) calls above) noise
+            // suppression and echo cancellation default to *enabled* in WebRtcVoiceEngine when no
+            // constraint overrides them, and were silently attenuating mic audio reported as
+            // quieter than the RTSP stream's. Echo cancellation has nothing to cancel here anyway
+            // (no local playback loopback -- this is capture-only, one-way to the browser).
+            // AGC is deliberately left on its default (enabled): unlike NS it normalizes *up*
+            // toward a target level rather than attenuating, so it should help quiet audio rather
+            // than cause it.
+            optional.add(MediaConstraints.KeyValuePair("googNoiseSuppression", "false"))
+            optional.add(MediaConstraints.KeyValuePair("googEchoCancellation", "false"))
+        }
+        val micSource = factory.createAudioSource(micConstraints)
         audioSource = micSource
         audioTrack = factory.createAudioTrack(AUDIO_TRACK_ID, micSource)
 
