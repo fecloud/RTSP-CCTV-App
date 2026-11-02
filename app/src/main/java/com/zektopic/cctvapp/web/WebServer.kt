@@ -93,10 +93,14 @@ class WebServer(
                 )
             }
 
-            if (!WebAuth.isAuthorized(
-                    settings.webAuthEnabled, settings.authUsername, settings.authPassword, headers["authorization"]
-                )
-            ) {
+            val sessionCookie = session.cookies.read(WebAuth.SESSION_COOKIE_NAME)
+            val authorizedBySession = WebAuth.isSessionAuthorized(
+                settings.webAuthEnabled, settings.authUsername, settings.authPassword, sessionCookie
+            )
+            val authorizedByBasic = WebAuth.isAuthorized(
+                settings.webAuthEnabled, settings.authUsername, settings.authPassword, headers["authorization"]
+            )
+            if (!authorizedBySession && !authorizedByBasic) {
                 return unauthorized()
             }
 
@@ -107,7 +111,16 @@ class WebServer(
                 session.parseBody(HashMap())
             }
 
-            processRequest(session)
+            val response = processRequest(session)
+            // This request just proved it holds the current credentials via the Basic header
+            // (rather than an already-valid session cookie) -- hand it a permanent cookie so the
+            // browser's native login prompt never has to reappear until the password changes.
+            if (authorizedByBasic && !authorizedBySession) {
+                WebAuth.sessionCookieHeader(settings.authUsername, settings.authPassword)?.let {
+                    response.addHeader("Set-Cookie", it)
+                }
+            }
+            response
         } catch (e: Exception) {
             Log.e("WebServer", "Request failed: ${session.uri}", e)
             newFixedLengthResponse(Response.Status.INTERNAL_ERROR, MIME_PLAINTEXT, "Internal Error")
@@ -124,10 +137,16 @@ class WebServer(
      */
     override fun openWebSocket(handshake: IHTTPSession): WebSocket {
         val headers = handshake.headers ?: emptyMap()
+        val sessionCookie = handshake.cookies.read(WebAuth.SESSION_COOKIE_NAME)
         val authorized = WebAuth.isOriginAllowed(headers["origin"], headers["host"]) &&
-            WebAuth.isAuthorized(
-                settings.webAuthEnabled, settings.authUsername, settings.authPassword, headers["authorization"]
-            )
+            (
+                WebAuth.isAuthorized(
+                    settings.webAuthEnabled, settings.authUsername, settings.authPassword, headers["authorization"]
+                ) ||
+                    WebAuth.isSessionAuthorized(
+                        settings.webAuthEnabled, settings.authUsername, settings.authPassword, sessionCookie
+                    )
+                )
         return when (handshake.uri) {
             "/webrtc-ws" -> WebRtcSignalingSocket(handshake, authorized)
             "/audio-ws" -> AudioStreamSocket(handshake, authorized)

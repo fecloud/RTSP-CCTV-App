@@ -176,6 +176,7 @@ This app puts a camera on your network. The defaults are chosen accordingly.
 | Control | Default | Notes |
 |---|---|---|
 | Web dashboard authentication | **On** | HTTP Basic. A strong password is generated on first run. |
+| Browser login persistence | **Permanent** | A cookie remembers a successful login until the password changes -- the native Basic-Auth prompt won't reappear. `curl`/script/NVR clients are unaffected; they keep authenticating via the header on every request. |
 | RTSP authentication | Off | Enable under *Authentication*; applies to the RTSP stream. |
 | Cross-origin requests | **Rejected** | Stops a website you visit from driving the camera over your LAN. |
 | Credentials in cloud backup | **Excluded** | Preferences and snapshots are excluded from Auto Backup and device transfer. |
@@ -218,6 +219,10 @@ HTTP Basic credentials and returns `401` with a `WWW-Authenticate` header otherw
 ```bash
 curl -u admin:<password> http://192.168.1.50:8081/status
 ```
+
+A browser that successfully authenticates once is handed a permanent session cookie (valid
+until the password changes) so it isn't asked again; this has no effect on `curl`/script/NVR
+clients, which always authenticate via the header.
 
 **Verbs.** State-changing endpoints accept `POST` (preferred) and `GET` (kept for
 compatibility with existing scripts and NVR integrations). Requests carrying a

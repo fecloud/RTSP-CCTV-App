@@ -114,6 +114,63 @@ object WebAuth {
         return userOk and passOk
     }
 
+    /** Name of the persistent "stay logged in" cookie issued after a successful Basic-Auth request. */
+    const val SESSION_COOKIE_NAME = "cctv_session"
+
+    /** ~10 years -- there is no server-side session store to expire, so this is effectively permanent. */
+    private const val SESSION_COOKIE_MAX_AGE_SECONDS = 315360000L
+
+    /**
+     * Derives a bearer token from the *current* configured credentials rather than issuing and
+     * storing a random one server-side: changing the dashboard username/password immediately
+     * invalidates every previously issued cookie (the same security property [isAuthorized]
+     * already has) without this app needing any session store, expiry sweep, or persistence
+     * across restarts. One-way (SHA-256) so a cookie captured by sniffing this plaintext,
+     * no-TLS, LAN-only traffic hands an eavesdropper a replayable credential, same as today's
+     * Basic header does, but not the literal password (unlike that header's base64, which is
+     * trivially reversible).
+     */
+    fun computeSessionToken(username: String, password: String): String {
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+        val hash = digest.digest("v1:$username:$password".toByteArray(Charsets.UTF_8))
+        val builder = StringBuilder(hash.size * 2)
+        for (byte in hash) {
+            builder.append("0123456789abcdef"[(byte.toInt() shr 4) and 0xF])
+            builder.append("0123456789abcdef"[byte.toInt() and 0xF])
+        }
+        return builder.toString()
+    }
+
+    /**
+     * Whether [sessionCookieValue] matches the token for the currently configured credentials.
+     * Mirrors [isAuthorized]'s fail-open rules (auth disabled, or no credentials configured yet)
+     * so callers can OR the two checks together without either one being more permissive than
+     * the other.
+     */
+    fun isSessionAuthorized(
+        authEnabled: Boolean,
+        expectedUsername: String,
+        expectedPassword: String,
+        sessionCookieValue: String?
+    ): Boolean {
+        if (!authEnabled) return true
+        if (expectedUsername.isEmpty() || expectedPassword.isEmpty()) return true
+        if (sessionCookieValue == null) return false
+        return constantTimeEquals(sessionCookieValue, computeSessionToken(expectedUsername, expectedPassword))
+    }
+
+    /**
+     * The `Set-Cookie` header value to hand a client that just authenticated via Basic Auth, so
+     * its browser never has to show that login prompt again until the password changes. No
+     * `Secure` attribute -- this server is plain HTTP only. Null when there are no credentials
+     * configured yet to key the cookie to.
+     */
+    fun sessionCookieHeader(username: String, password: String): String? {
+        if (username.isEmpty() || password.isEmpty()) return null
+        val token = computeSessionToken(username, password)
+        return "$SESSION_COOKIE_NAME=$token; Max-Age=$SESSION_COOKIE_MAX_AGE_SECONDS; Path=/; HttpOnly; SameSite=Strict"
+    }
+
     /**
      * Rejects cross-site requests. A browser attaches `Origin` on any cross-origin
      * request, so a page on the public internet cannot drive this server even while
