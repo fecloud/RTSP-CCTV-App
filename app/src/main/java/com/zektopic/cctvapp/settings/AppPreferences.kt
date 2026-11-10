@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import com.zektopic.cctvapp.camera.CameraResolutionUtil
 import com.zektopic.cctvapp.web.WebAuth
+import com.zektopic.cctvapp.webrtc.IceServerConfig
 import androidx.core.content.edit
 
 /**
@@ -298,5 +299,16 @@ object AppPreferences {
                 )
             )
         }
+    }
+
+    // --- WebRTC ICE servers ---
+    private const val KEY_WEBRTC_ICE_SERVERS_JSON = "webrtc_ice_servers_json"
+
+    /** JSON `RTCIceServer[]`, see [com.zektopic.cctvapp.webrtc.IceServerConfig]. */
+    fun getWebRtcIceServersJson(context: Context): String =
+        prefs(context).getString(KEY_WEBRTC_ICE_SERVERS_JSON, null) ?: IceServerConfig.DEFAULT_JSON
+
+    fun setWebRtcIceServersJson(context: Context, json: String) {
+        prefs(context).edit { putString(KEY_WEBRTC_ICE_SERVERS_JSON, json) }
     }
 }

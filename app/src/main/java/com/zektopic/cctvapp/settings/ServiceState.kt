@@ -1,6 +1,7 @@
 package com.zektopic.cctvapp.settings
 
 import android.content.Context
+import com.zektopic.cctvapp.webrtc.IceServerConfig
 
 /**
  * The stream/encoder/dashboard settings for one running [CctvServerService] instance.
@@ -39,6 +40,8 @@ data class ServiceSettings(
     val recordToGalleryEnabled: Boolean = false,
     val recordSegmentMinutes: Int = AppPreferences.DEFAULT_RECORD_SEGMENT_MINUTES,
     val recordStorageThresholdPercent: Int = AppPreferences.DEFAULT_RECORD_STORAGE_THRESHOLD_PERCENT,
+    /** WebRTC preview STUN/TURN servers -- see [com.zektopic.cctvapp.webrtc.IceServerConfig]. */
+    val webrtcIceServersJson: String = IceServerConfig.DEFAULT_JSON,
 ) {
     companion object {
         /**
@@ -67,6 +70,7 @@ data class ServiceSettings(
             recordToGalleryEnabled = AppPreferences.getRecordToGalleryEnabled(context),
             recordSegmentMinutes = AppPreferences.getRecordSegmentMinutes(context),
             recordStorageThresholdPercent = AppPreferences.getRecordStorageThresholdPercent(context),
+            webrtcIceServersJson = AppPreferences.getWebRtcIceServersJson(context),
         )
     }
 }

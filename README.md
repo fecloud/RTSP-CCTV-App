@@ -235,6 +235,8 @@ cross-origin `Origin` header are rejected with `403`.
 | `GET /` | The dashboard |
 | `GET /status` | JSON status: streaming state, codec, resolution, every setting, battery, Wi-Fi |
 | `GET /recordings` | HTML page listing saved recordings, newest first |
+| `GET /ice` | HTML page for editing the WebRTC preview's STUN/TURN servers |
+| `GET /ice-servers.json` | `{"iceServers":[...],"defaultIceServers":[...]}` — current and built-in `RTCIceServer[]` |
 | `GET /recording.mp4?id=<id>[&download=1]` | Streams a recording inline, or forces download with `download=1` |
 
 ### Write
@@ -247,6 +249,7 @@ cross-origin `Origin` header are rejected with `403`.
 | `POST /action/set-resolution` | `w=<int>&h=<int>` |
 | `POST /action/set-setting` | `key=<key>&value=<value>` |
 | `POST /action/set-auth` | `enabled=<bool>&username=<s>&password=<s>` |
+| `POST /action/set-ice-servers` | `value=<JSON RTCIceServer[]>` — validated; `400` with the reason if invalid. Applies on the next WebRTC connection |
 
 ### Live preview (MSE)
 

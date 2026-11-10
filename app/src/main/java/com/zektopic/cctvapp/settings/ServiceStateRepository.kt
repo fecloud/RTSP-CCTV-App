@@ -84,6 +84,7 @@ object ServiceStateRepository {
         AppPreferences.setRecordToGalleryEnabled(context, s.recordToGalleryEnabled)
         AppPreferences.setRecordSegmentMinutes(context, s.recordSegmentMinutes)
         AppPreferences.setRecordStorageThresholdPercent(context, s.recordStorageThresholdPercent)
+        AppPreferences.setWebRtcIceServersJson(context, s.webrtcIceServersJson)
         // activeCodec deliberately excluded -- not a stored preference, see ServiceSettings.
     }
 }

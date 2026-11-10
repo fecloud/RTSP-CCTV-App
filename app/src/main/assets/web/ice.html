@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>ICE Servers — {{IP}}</title>
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        :root {
+            --bg: #0f1117;
+            --surface: #1a1d27;
+            --border: rgba(255,255,255,0.06);
+            --text: #e8eaed;
+            --text-secondary: #9aa0b0;
+            --accent: #00b894;
+            --danger: #e17055;
+            --radius: 16px;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 24px 16px;
+            -webkit-font-smoothing: antialiased;
+        }
+        .container { width: 100%; max-width: 720px; }
+        .header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; }
+        .header h1 {
+            font-size: 22px;
+            font-weight: 700;
+            letter-spacing: -0.5px;
+            background: linear-gradient(135deg, #00b894, #00cec9);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .header a { color: var(--text-secondary); text-decoration: none; font-weight: 600; font-size: 14px; }
+        .card {
+            background: var(--surface);
+            border-radius: var(--radius);
+            border: 1px solid var(--border);
+            padding: 20px;
+        }
+        .hint { font-size: 13px; color: var(--text-secondary); line-height: 1.5; margin-bottom: 12px; }
+        .hint code { color: var(--text); }
+        textarea {
+            width: 100%;
+            min-height: 360px;
+            background: var(--bg);
+            color: var(--text);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 12px;
+            font-family: ui-monospace, Menlo, Consolas, monospace;
+            font-size: 13px;
+            line-height: 1.4;
+            resize: vertical;
+        }
+        .actions { display: flex; gap: 12px; margin-top: 16px; flex-wrap: wrap; }
+        button {
+            border: none;
+            border-radius: 10px;
+            padding: 10px 18px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        .primary { background: var(--accent); color: #fff; }
+        .secondary { background: rgba(255,255,255,0.08); color: var(--text); }
+        #message { margin-top: 12px; font-size: 13px; min-height: 18px; white-space: pre-wrap; }
+        #message.ok { color: var(--accent); }
+        #message.error { color: var(--danger); }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>WebRTC ICE Servers</h1>
+            <a href="/">&#8592; Dashboard</a>
+        </div>
+        <div class="card">
+            <p class="hint">
+                STUN/TURN servers used by the WebRTC preview, as a JSON <code>RTCIceServer[]</code> array:
+                <code>[{"urls": ["turn:host:3478"], "username": "...", "credential": "..."}]</code>.
+                Both the browser and the phone use this list. Changes apply to the next WebRTC
+                (re)connection &mdash; reload the dashboard to apply immediately. An empty array
+                <code>[]</code> means LAN-only (host candidates).
+            </p>
+            <textarea id="iceJson" spellcheck="false"></textarea>
+            <div class="actions">
+                <button class="primary" onclick="save()">Save</button>
+                <button class="secondary" onclick="format()">Format</button>
+                <button class="secondary" onclick="restoreDefault()">Restore Default</button>
+            </div>
+            <div id="message"></div>
+        </div>
+    </div>
+    <script>
+        let defaultIceServers = [];
+        const textarea = document.getElementById('iceJson');
+
+        function showMessage(text, ok) {
+            const el = document.getElementById('message');
+            el.textContent = text;
+            el.className = ok ? 'ok' : 'error';
+        }
+
+        async function load() {
+            try {
+                const resp = await fetch('/ice-servers.json', { cache: 'no-store' });
+                const data = await resp.json();
+                defaultIceServers = data.defaultIceServers || [];
+                textarea.value = JSON.stringify(data.iceServers || [], null, 2);
+            } catch (e) {
+                showMessage('Failed to load current config: ' + e, false);
+            }
+        }
+
+        function format() {
+            try {
+                textarea.value = JSON.stringify(JSON.parse(textarea.value), null, 2);
+                showMessage('', true);
+            } catch (e) {
+                showMessage('Invalid JSON: ' + e.message, false);
+            }
+        }
+
+        function restoreDefault() {
+            textarea.value = JSON.stringify(defaultIceServers, null, 2);
+            showMessage('Default loaded into the editor — click Save to apply.', true);
+        }
+
+        async function save() {
+            let parsed;
+            try {
+                parsed = JSON.parse(textarea.value);
+            } catch (e) {
+                showMessage('Invalid JSON: ' + e.message, false);
+                return;
+            }
+            try {
+                const resp = await fetch('/action/set-ice-servers', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: new URLSearchParams({ value: JSON.stringify(parsed) }),
+                });
+                const text = await resp.text();
+                if (resp.ok) {
+                    showMessage('Saved. Reload the dashboard to reconnect WebRTC with the new servers.', true);
+                    load();
+                } else {
+                    showMessage('Rejected: ' + text, false);
+                }
+            } catch (e) {
+                showMessage('Save failed: ' + e, false);
+            }
+        }
+
+        load();
+    </script>
+</body>
+</html>

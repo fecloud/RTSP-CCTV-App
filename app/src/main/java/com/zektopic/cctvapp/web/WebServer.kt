@@ -13,6 +13,7 @@ import com.zektopic.cctvapp.settings.SettingUpdateHandler
 import com.zektopic.cctvapp.settings.ServiceStateRepository
 import com.zektopic.cctvapp.audio.AudioStreamSocket
 import com.zektopic.cctvapp.mse.MseStreamSocket
+import com.zektopic.cctvapp.webrtc.IceServerConfig
 import com.zektopic.cctvapp.webrtc.WebRtcSignalingSocket
 import fi.iki.elonen.NanoWSD
 import java.io.InputStream
@@ -202,6 +203,26 @@ class WebServer(
                 return newFixedLengthResponse(Response.Status.OK, MIME_PLAINTEXT, "Setting Updated: $key")
             }
             return newFixedLengthResponse(Response.Status.BAD_REQUEST, MIME_PLAINTEXT, "Missing key")
+        }
+
+        if (uri == "/ice") {
+            return newFixedLengthResponse(iceTemplate.replace("{{IP}}", WebAuth.escapeHtml(ipAddress)))
+        }
+
+        // Read by webrtc-preview.js before every RTCPeerConnection, and by the /ice page.
+        // Both values are already-validated JSON arrays, so they're embedded verbatim.
+        if (uri == "/ice-servers.json") {
+            val json = "{\"iceServers\":${settings.webrtcIceServersJson}," +
+                "\"defaultIceServers\":${IceServerConfig.DEFAULT_JSON}}"
+            return newFixedLengthResponse(Response.Status.OK, "application/json", json)
+        }
+
+        if (uri == "/action/set-ice-servers") {
+            val value = session.parameters["value"]?.get(0)
+                ?: return newFixedLengthResponse(Response.Status.BAD_REQUEST, MIME_PLAINTEXT, "Missing value")
+            val error = settingUpdateHandler.handleIceServers(value)
+                ?: return newFixedLengthResponse(Response.Status.OK, MIME_PLAINTEXT, "ICE Servers Updated")
+            return newFixedLengthResponse(Response.Status.BAD_REQUEST, MIME_PLAINTEXT, error)
         }
 
         // Auth update endpoint
@@ -442,6 +463,7 @@ class WebServer(
      */
     private val dashboardTemplate: String by lazy { loadAsset("web/dashboard.html") }
     private val recordingsTemplate: String by lazy { loadAsset("web/recordings.html") }
+    private val iceTemplate: String by lazy { loadAsset("web/ice.html") }
     private val h264ConverterJs: String by lazy { loadAsset("web/h264-converter.js") }
     private val audioPreviewJs: String by lazy { loadAsset("web/audio-preview.js") }
     private val msePreviewJs: String by lazy { loadAsset("web/mse-preview.js") }

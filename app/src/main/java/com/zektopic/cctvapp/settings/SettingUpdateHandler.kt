@@ -2,6 +2,7 @@ package com.zektopic.cctvapp.settings
 
 import android.content.Context
 import com.zektopic.cctvapp.camera.CameraResolutionUtil
+import com.zektopic.cctvapp.webrtc.IceServerConfig
 
 /**
  * Handles a single dashboard setting change: `key`/`value` come straight from
@@ -72,6 +73,20 @@ class SettingUpdateHandler(private val context: Context) {
     /** Handles `/action/set-resolution`, which isn't part of the generic key/value scheme above. */
     fun handleResolution(width: Int, height: Int) =
         ServiceStateRepository.updateSettings(context) { it.copy(videoWidth = width, videoHeight = height) }
+
+    /**
+     * Handles `/action/set-ice-servers`. Validates before writing so a typo can't leave the
+     * WebRTC preview with an unusable config; returns the validation error, or null on success.
+     */
+    fun handleIceServers(json: String): String? {
+        try {
+            IceServerConfig.parse(json)
+        } catch (e: IllegalArgumentException) {
+            return e.message ?: "Invalid ICE server config"
+        }
+        ServiceStateRepository.updateSettings(context) { it.copy(webrtcIceServersJson = json.trim()) }
+        return null
+    }
 
     /** Handles `/action/set-auth`, which isn't part of the generic key/value scheme above. */
     fun handleAuth(enabled: Boolean, username: String, password: String) =

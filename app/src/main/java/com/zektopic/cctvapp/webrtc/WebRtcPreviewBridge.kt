@@ -1,6 +1,7 @@
 package com.zektopic.cctvapp.webrtc
 
 import android.content.Context
+import com.zektopic.cctvapp.settings.ServiceStateRepository
 import com.zektopic.cctvapp.streaming.SharedCameraStream
 import org.webrtc.PeerConnection
 
@@ -32,18 +33,6 @@ class WebRtcPreviewBridge(private val context: Context) {
 
     private companion object {
         private const val STREAM_ID = "cctv-stream"
-
-        private val ICE_SERVERS = listOf(
-            PeerConnection.IceServer.builder("stun:stun.miwifi.com:3478").createIceServer(),
-            PeerConnection.IceServer.builder("turn:162.14.76.155:3478")
-                .setUsername("cd260930")
-                .setPassword("hsscd123adcx.")
-                .createIceServer(),
-            PeerConnection.IceServer.builder("turn:124.223.38.110:3478")
-                .setUsername("hsssh")
-                .setPassword("hssabc.x")
-                .createIceServer(),
-        )
     }
 
     /** The exact [SharedCameraStream] instance this is currently registered on, if any -- see [onStreamStarted]. */
@@ -70,7 +59,10 @@ class WebRtcPreviewBridge(private val context: Context) {
         val activeStream = stream ?: return null
         val activeEngine = engine ?: WebRtcEngine(context, activeStream).also { engine = it }
 
-        val rtcConfig = PeerConnection.RTCConfiguration(ICE_SERVERS).apply {
+        val rtcConfig = PeerConnection.RTCConfiguration(
+            // Read fresh per viewer so an edit on the dashboard's /ice page applies on the next connection.
+            IceServerConfig.toPeerConnectionIceServers(ServiceStateRepository.settings.webrtcIceServersJson),
+        ).apply {
             sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
         }
         val pc = activeEngine.factory.createPeerConnection(rtcConfig, observer) ?: return null

@@ -14,26 +14,21 @@ const WEBRTC_PREVIEW = {
     RECONNECT_DELAY_MS: 2000,
 };
 
-const rtcConfiguration = {
-    iceServers: [
-        {
-            urls: ['stun:stun.miwifi.com:3478'],
-        },
-        {
-            urls: ['turn:162.14.76.155:3478'],
-            username: 'cd260930',
-            credential: 'hsscd123adcx.',
-        },
-        {
-            urls: ['turn:124.223.38.110:3478'],
-            username: 'hsssh',
-            credential: 'hssabc.x',
-        },
-    ],
-    iceCandidatePoolSize: 10,
-};
+// STUN/TURN servers come from the phone (/ice-servers.json, edited on the /ice page) so both
+// ends of the connection always use the same config -- see IceServerConfig.kt. Re-fetched on every
+// (re)connect, so a change there applies at the next reconnect without reloading the dashboard.
+async function loadRtcConfiguration() {
+    let iceServers = [];
+    try {
+        const resp = await fetch('/ice-servers.json', { cache: 'no-store' });
+        if (resp.ok) iceServers = (await resp.json()).iceServers || [];
+    } catch (e) {
+        console.error('[webrtc] failed to load ICE servers, falling back to host candidates only', e);
+    }
+    return { iceServers, iceCandidatePoolSize: 10 };
+}
 
-function startWebRtcPreview() {
+async function startWebRtcPreview() {
     const video = document.getElementById('cam-preview');
     video.playbackRate = 1.0;
     // Always starts muted -- required for autoplay to not be blocked (confirmed on-device: even
@@ -43,7 +38,7 @@ function startWebRtcPreview() {
     // native volume control, which is a real gesture and isn't subject to this.
     video.muted = true;
 
-    const pc = new RTCPeerConnection(rtcConfiguration);
+    const pc = new RTCPeerConnection(await loadRtcConfiguration());
     pc.addTransceiver('video', { direction: 'recvonly' });
     pc.addTransceiver('audio', { direction: 'recvonly' });
     pc.ontrack = (event) => {

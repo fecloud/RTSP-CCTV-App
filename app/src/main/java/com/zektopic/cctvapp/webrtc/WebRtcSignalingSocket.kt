@@ -29,7 +29,7 @@ import org.webrtc.SessionDescription
  * with an SDP offer built from `recvonly` video and audio transceivers (see `webrtc-preview.js`);
  * this replies with an answer built from [WebRtcPreviewBridge]'s shared video and audio tracks,
  * then relays ICE candidates both ways. [WebRtcPreviewBridge.attachViewer] configures STUN/TURN
- * servers (see its `ICE_SERVERS`), so candidates may include server-reflexive/relay addresses in
+ * servers (see [IceServerConfig], editable from the dashboard's `/ice` page), so candidates may include server-reflexive/relay addresses in
  * addition to host candidates.
  *
  * [authorized] is decided in `openWebSocket()` from the handshake headers -- NanoWSD always
