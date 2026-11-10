@@ -2,6 +2,7 @@ package com.zektopic.cctvapp.webrtc
 
 import com.zektopic.cctvapp.log.AppLog as Log
 import com.zektopic.cctvapp.service.PreviewBus
+import com.zektopic.cctvapp.settings.ServiceStateRepository
 import fi.iki.elonen.NanoHTTPD.IHTTPSession
 import fi.iki.elonen.NanoWSD
 import java.io.IOException
@@ -120,7 +121,15 @@ class WebRtcSignalingSocket(
 
     private fun handleOffer(json: JSONObject) {
         val activeBridge = bridge ?: return
-        val pc = activeBridge.attachViewer(observer)
+        // Resolve ICE servers here, on this worker thread -- a dynamic-TURN fetch can block, and
+        // attachViewer is @Synchronized, so it must not do network I/O under that monitor.
+        val settings = ServiceStateRepository.settings
+        val iceServers = WebRtcIceServers.resolvePeerConnectionIceServers(
+            settings.webrtcIceServersJson,
+            settings.webrtcDynamicTurnEnabled,
+            settings.webrtcDynamicTurnUrl,
+        )
+        val pc = activeBridge.attachViewer(observer, iceServers)
         if (pc == null) {
             closeQuietly("Camera not streaming", NanoWSD.WebSocketFrame.CloseCode.GoingAway)
             return

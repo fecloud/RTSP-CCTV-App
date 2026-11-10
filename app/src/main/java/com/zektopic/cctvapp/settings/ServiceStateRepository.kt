@@ -85,6 +85,8 @@ object ServiceStateRepository {
         AppPreferences.setRecordSegmentMinutes(context, s.recordSegmentMinutes)
         AppPreferences.setRecordStorageThresholdPercent(context, s.recordStorageThresholdPercent)
         AppPreferences.setWebRtcIceServersJson(context, s.webrtcIceServersJson)
+        AppPreferences.setWebRtcDynamicTurnEnabled(context, s.webrtcDynamicTurnEnabled)
+        AppPreferences.setWebRtcDynamicTurnUrl(context, s.webrtcDynamicTurnUrl)
         // activeCodec deliberately excluded -- not a stored preference, see ServiceSettings.
     }
 }

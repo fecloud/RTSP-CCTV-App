@@ -14,6 +14,7 @@ import com.zektopic.cctvapp.settings.ServiceStateRepository
 import com.zektopic.cctvapp.audio.AudioStreamSocket
 import com.zektopic.cctvapp.mse.MseStreamSocket
 import com.zektopic.cctvapp.webrtc.IceServerConfig
+import com.zektopic.cctvapp.webrtc.WebRtcIceServers
 import com.zektopic.cctvapp.webrtc.WebRtcSignalingSocket
 import fi.iki.elonen.NanoWSD
 import java.io.InputStream
@@ -210,10 +211,19 @@ class WebServer(
         }
 
         // Read by webrtc-preview.js before every RTCPeerConnection, and by the /ice page.
-        // Both values are already-validated JSON arrays, so they're embedded verbatim.
+        // `iceServers` is the effective list the browser should use (static config plus, when
+        // enabled, a freshly fetched dynamic TURN credential); `configuredIceServers` is just the
+        // static config the /ice editor shows.
         if (uri == "/ice-servers.json") {
-            val json = "{\"iceServers\":${settings.webrtcIceServersJson}," +
-                "\"defaultIceServers\":${IceServerConfig.DEFAULT_JSON}}"
+            val s = settings
+            val effective = WebRtcIceServers.resolveJson(
+                s.webrtcIceServersJson, s.webrtcDynamicTurnEnabled, s.webrtcDynamicTurnUrl
+            )
+            val json = "{\"iceServers\":$effective," +
+                "\"configuredIceServers\":${s.webrtcIceServersJson}," +
+                "\"defaultIceServers\":${IceServerConfig.DEFAULT_JSON}," +
+                "\"dynamicTurnEnabled\":${s.webrtcDynamicTurnEnabled}," +
+                "\"dynamicTurnUrl\":\"${escapeJson(s.webrtcDynamicTurnUrl)}\"}"
             return newFixedLengthResponse(Response.Status.OK, "application/json", json)
         }
 

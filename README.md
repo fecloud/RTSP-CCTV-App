@@ -236,7 +236,7 @@ cross-origin `Origin` header are rejected with `403`.
 | `GET /status` | JSON status: streaming state, codec, resolution, every setting, battery, Wi-Fi |
 | `GET /recordings` | HTML page listing saved recordings, newest first |
 | `GET /ice` | HTML page for editing the WebRTC preview's STUN/TURN servers |
-| `GET /ice-servers.json` | `{"iceServers":[...],"defaultIceServers":[...]}` — current and built-in `RTCIceServer[]` |
+| `GET /ice-servers.json` | `{"iceServers":[...],"configuredIceServers":[...],"defaultIceServers":[...],"dynamicTurnEnabled":<bool>,"dynamicTurnUrl":"..."}` — `iceServers` is the effective list (static + any fetched dynamic TURN), `configuredIceServers` is the static config the editor shows |
 | `GET /recording.mp4?id=<id>[&download=1]` | Streams a recording inline, or forces download with `download=1` |
 
 ### Write
@@ -328,6 +328,8 @@ first) would.
 | `bitrate_kbps` | int 500–8000 | Video bitrate, applied live while streaming |
 | `video_fps` | int 5–30 | Video frame rate; changing it restarts the stream |
 | `web_auth_enabled` | bool | Require authentication on port 8081 |
+| `webrtc_dynamic_turn_enabled` | bool | Fetch a short-lived TURN credential per WebRTC connection and merge it into the ICE list (see `/ice`) |
+| `webrtc_dynamic_turn_url` | string | Signaling server (`wss://…`) the dynamic TURN credential is fetched from |
 | `record_to_gallery_enabled` | bool | Record rotating segments to the app's private storage, browsable via `/recordings` |
 | `record_segment_minutes` | int 1–60 | Length of each recorded segment |
 | `record_storage_threshold_percent` | int 10–90 | Local storage usage above which the oldest recorded segments are deleted |

@@ -1,7 +1,6 @@
 package com.zektopic.cctvapp.webrtc
 
 import android.content.Context
-import com.zektopic.cctvapp.settings.ServiceStateRepository
 import com.zektopic.cctvapp.streaming.SharedCameraStream
 import org.webrtc.PeerConnection
 
@@ -53,16 +52,20 @@ class WebRtcPreviewBridge(private val context: Context) {
      * Lazily brings up [WebRtcEngine] on the first viewer, and hands back a fresh
      * [PeerConnection] carrying its shared video track. Returns null if the camera isn't actually
      * streaming yet, mirroring `MseVideoBridge.snapshotForNewViewer` returning null pre-stream.
+     *
+     * [iceServers] is resolved by the caller (on a worker thread) via [WebRtcIceServers] -- a
+     * dynamic-TURN fetch can block, and doing it here would hold this method's monitor across
+     * network I/O.
      */
     @Synchronized
-    fun attachViewer(observer: PeerConnection.Observer): PeerConnection? {
+    fun attachViewer(
+        observer: PeerConnection.Observer,
+        iceServers: List<PeerConnection.IceServer>,
+    ): PeerConnection? {
         val activeStream = stream ?: return null
         val activeEngine = engine ?: WebRtcEngine(context, activeStream).also { engine = it }
 
-        val rtcConfig = PeerConnection.RTCConfiguration(
-            // Read fresh per viewer so an edit on the dashboard's /ice page applies on the next connection.
-            IceServerConfig.toPeerConnectionIceServers(ServiceStateRepository.settings.webrtcIceServersJson),
-        ).apply {
+        val rtcConfig = PeerConnection.RTCConfiguration(iceServers).apply {
             sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
         }
         val pc = activeEngine.factory.createPeerConnection(rtcConfig, observer) ?: return null

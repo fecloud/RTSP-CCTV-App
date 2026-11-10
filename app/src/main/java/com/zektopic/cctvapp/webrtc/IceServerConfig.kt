@@ -67,15 +67,29 @@ object IceServerConfig {
     }
 
     /** Never throws: an invalid stored value (shouldn't happen -- writes are validated) falls back to [DEFAULT_JSON]. */
-    fun toPeerConnectionIceServers(json: String): List<PeerConnection.IceServer> {
-        val entries = runCatching { parse(json) }.getOrElse { parse(DEFAULT_JSON) }
-        return entries.map { entry ->
+    fun parseOrDefault(json: String): List<Entry> =
+        runCatching { parse(json) }.getOrElse { parse(DEFAULT_JSON) }
+
+    /** Renders [entries] back into the browser's `RTCIceServer[]` JSON shape (for `/ice-servers.json`). */
+    fun entriesToJson(entries: List<Entry>): String {
+        val array = JSONArray()
+        entries.forEach { entry ->
+            val obj = JSONObject()
+            obj.put("urls", JSONArray(entry.urls))
+            entry.username?.let { obj.put("username", it) }
+            entry.credential?.let { obj.put("credential", it) }
+            array.put(obj)
+        }
+        return array.toString()
+    }
+
+    fun entriesToPeerConnectionIceServers(entries: List<Entry>): List<PeerConnection.IceServer> =
+        entries.map { entry ->
             PeerConnection.IceServer.builder(entry.urls).apply {
                 entry.username?.let { setUsername(it) }
                 entry.credential?.let { setPassword(it) }
             }.createIceServer()
         }
-    }
 
     private fun readUrls(obj: JSONObject, index: Int): List<String> {
         val raw = obj.opt("urls")

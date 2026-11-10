@@ -311,4 +311,25 @@ object AppPreferences {
     fun setWebRtcIceServersJson(context: Context, json: String) {
         prefs(context).edit { putString(KEY_WEBRTC_ICE_SERVERS_JSON, json) }
     }
+
+    // --- Dynamic TURN (fetched per-connection from a signaling server) ---
+    private const val KEY_WEBRTC_DYNAMIC_TURN_ENABLED = "webrtc_dynamic_turn_enabled"
+    private const val KEY_WEBRTC_DYNAMIC_TURN_URL = "webrtc_dynamic_turn_url"
+    const val DEFAULT_DYNAMIC_TURN_URL = "wss://api.crossdesk.cn:9099"
+
+    /** Off by default: contacts an external signaling server, which the owner should opt into. */
+    fun getWebRtcDynamicTurnEnabled(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_WEBRTC_DYNAMIC_TURN_ENABLED, false)
+
+    fun setWebRtcDynamicTurnEnabled(context: Context, enabled: Boolean) {
+        prefs(context).edit { putBoolean(KEY_WEBRTC_DYNAMIC_TURN_ENABLED, enabled) }
+    }
+
+    fun getWebRtcDynamicTurnUrl(context: Context): String =
+        prefs(context).getString(KEY_WEBRTC_DYNAMIC_TURN_URL, null)?.takeIf { it.isNotBlank() }
+            ?: DEFAULT_DYNAMIC_TURN_URL
+
+    fun setWebRtcDynamicTurnUrl(context: Context, url: String) {
+        prefs(context).edit { putString(KEY_WEBRTC_DYNAMIC_TURN_URL, url) }
+    }
 }

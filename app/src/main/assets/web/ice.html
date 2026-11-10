@@ -73,6 +73,34 @@
         #message { margin-top: 12px; font-size: 13px; min-height: 18px; white-space: pre-wrap; }
         #message.ok { color: var(--accent); }
         #message.error { color: var(--danger); }
+        .card + .card { margin-top: 20px; }
+        .card h2 { font-size: 16px; font-weight: 700; margin-bottom: 12px; }
+        .row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 10px 0; }
+        .row + .row { border-top: 1px solid var(--border); }
+        .row label { font-size: 15px; font-weight: 500; }
+        .url-input {
+            width: 100%;
+            margin-top: 10px;
+            background: var(--bg);
+            color: var(--text);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 10px 12px;
+            font-family: ui-monospace, Menlo, Consolas, monospace;
+            font-size: 13px;
+        }
+        .toggle { position: relative; width: 46px; height: 28px; flex: none; }
+        .toggle input { opacity: 0; width: 0; height: 0; }
+        .track {
+            position: absolute; inset: 0; cursor: pointer;
+            background: rgba(255,255,255,0.15); border-radius: 999px; transition: background .2s;
+        }
+        .track::before {
+            content: ""; position: absolute; height: 22px; width: 22px; left: 3px; top: 3px;
+            background: #fff; border-radius: 50%; transition: transform .2s;
+        }
+        .toggle input:checked + .track { background: var(--accent); }
+        .toggle input:checked + .track::before { transform: translateX(18px); }
     </style>
 </head>
 <body>
@@ -97,6 +125,26 @@
             </div>
             <div id="message"></div>
         </div>
+
+        <div class="card">
+            <h2>Dynamic TURN</h2>
+            <p class="hint">
+                Fetch a short-lived TURN credential from a signaling server at connect time, and
+                add it on top of the servers above. Use this when the TURN server hands out
+                temporary (expiring) credentials rather than fixed ones. The phone fetches it and
+                shares it with the browser automatically.
+            </p>
+            <div class="row">
+                <label for="dynEnabled">Enable dynamic TURN</label>
+                <label class="toggle">
+                    <input type="checkbox" id="dynEnabled" onchange="saveDynamic()">
+                    <span class="track"></span>
+                </label>
+            </div>
+            <input class="url-input" id="dynUrl" spellcheck="false"
+                   placeholder="wss://host:port" onchange="saveDynamic()">
+            <div id="dynMessage" style="margin-top:12px; font-size:13px; min-height:18px;"></div>
+        </div>
     </div>
     <script>
         let defaultIceServers = [];
@@ -113,9 +161,42 @@
                 const resp = await fetch('/ice-servers.json', { cache: 'no-store' });
                 const data = await resp.json();
                 defaultIceServers = data.defaultIceServers || [];
-                textarea.value = JSON.stringify(data.iceServers || [], null, 2);
+                // Show the statically configured servers (not the effective list, which may include
+                // a fetched dynamic credential the user shouldn't be editing by hand).
+                textarea.value = JSON.stringify(data.configuredIceServers || [], null, 2);
+                document.getElementById('dynEnabled').checked = !!data.dynamicTurnEnabled;
+                document.getElementById('dynUrl').value = data.dynamicTurnUrl || '';
             } catch (e) {
                 showMessage('Failed to load current config: ' + e, false);
+            }
+        }
+
+        function showDynMessage(text, ok) {
+            const el = document.getElementById('dynMessage');
+            el.textContent = text;
+            el.style.color = ok ? 'var(--accent)' : 'var(--danger)';
+        }
+
+        async function post(url, params) {
+            return fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: new URLSearchParams(params),
+            });
+        }
+
+        async function saveDynamic() {
+            const enabled = document.getElementById('dynEnabled').checked;
+            const url = document.getElementById('dynUrl').value.trim();
+            try {
+                if (url) {
+                    const r = await post('/action/set-setting', { key: 'webrtc_dynamic_turn_url', value: url });
+                    if (!r.ok) { showDynMessage('URL rejected (must start with wss://)', false); return; }
+                }
+                await post('/action/set-setting', { key: 'webrtc_dynamic_turn_enabled', value: String(enabled) });
+                showDynMessage('Saved. Applies on the next WebRTC connection.', true);
+            } catch (e) {
+                showDynMessage('Save failed: ' + e, false);
             }
         }
 

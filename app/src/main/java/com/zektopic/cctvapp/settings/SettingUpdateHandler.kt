@@ -50,6 +50,11 @@ class SettingUpdateHandler(private val context: Context) {
                 val coerced = requested.coerceIn(AppPreferences.FPS_MIN, AppPreferences.FPS_MAX)
                 ServiceStateRepository.updateSettings(context) { it.copy(videoFps = coerced) }
             }
+            "webrtc_dynamic_turn_enabled" ->
+                ServiceStateRepository.updateSettings(context) { it.copy(webrtcDynamicTurnEnabled = value.toBoolean()) }
+            "webrtc_dynamic_turn_url" -> value.trim().takeIf { it.startsWith("wss://") }?.let { url ->
+                ServiceStateRepository.updateSettings(context) { it.copy(webrtcDynamicTurnUrl = url) }
+            }
             "web_auth_enabled" ->
                 ServiceStateRepository.updateSettings(context) { it.copy(webAuthEnabled = value.toBoolean()) }
             "record_to_gallery_enabled" ->

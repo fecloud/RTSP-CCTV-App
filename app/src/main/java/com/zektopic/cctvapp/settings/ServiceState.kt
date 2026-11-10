@@ -42,6 +42,9 @@ data class ServiceSettings(
     val recordStorageThresholdPercent: Int = AppPreferences.DEFAULT_RECORD_STORAGE_THRESHOLD_PERCENT,
     /** WebRTC preview STUN/TURN servers -- see [com.zektopic.cctvapp.webrtc.IceServerConfig]. */
     val webrtcIceServersJson: String = IceServerConfig.DEFAULT_JSON,
+    /** Fetch a short-lived TURN credential at connect time -- see [com.zektopic.cctvapp.webrtc.DynamicTurnProvider]. */
+    val webrtcDynamicTurnEnabled: Boolean = false,
+    val webrtcDynamicTurnUrl: String = AppPreferences.DEFAULT_DYNAMIC_TURN_URL,
 ) {
     companion object {
         /**
@@ -71,6 +74,8 @@ data class ServiceSettings(
             recordSegmentMinutes = AppPreferences.getRecordSegmentMinutes(context),
             recordStorageThresholdPercent = AppPreferences.getRecordStorageThresholdPercent(context),
             webrtcIceServersJson = AppPreferences.getWebRtcIceServersJson(context),
+            webrtcDynamicTurnEnabled = AppPreferences.getWebRtcDynamicTurnEnabled(context),
+            webrtcDynamicTurnUrl = AppPreferences.getWebRtcDynamicTurnUrl(context),
         )
     }
 }
