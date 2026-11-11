@@ -75,7 +75,14 @@ function formatUptime(ms) {
 let initialLoad = true;
 function fetchStatus() {
     fetch('/status')
-        .then(r => r.json())
+        .then(r => {
+            // Logged out (e.g. the password was changed from another device): go sign in again.
+            if (r.status === 401) {
+                window.location.href = '/login';
+                return new Promise(() => {});
+            }
+            return r.json();
+        })
         .then(data => {
             const badge = document.getElementById('statusBadge');
             const statusText = document.getElementById('statusText');

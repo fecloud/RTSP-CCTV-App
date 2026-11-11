@@ -19,6 +19,7 @@ import com.zektopic.cctvapp.webrtc.WebRtcSignalingSocket
 import fi.iki.elonen.NanoWSD
 import java.io.ByteArrayInputStream
 import java.io.InputStream
+import java.net.URLEncoder
 import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
@@ -50,7 +51,8 @@ class WebServer(
 
         /** Bind whatever port the OS hands out. Only used by tests. */
         const val EPHEMERAL_PORT = 0
-        private const val REALM = "CCTV Dashboard"
+        /** Slows down password guessing against `/login` (each worker thread just waits). */
+        private const val LOGIN_FAILURE_DELAY_MS = 1000L
     }
 
     /** Same data source [com.zektopic.cctvapp.MainActivity] and the service read/write. */
@@ -115,6 +117,12 @@ class WebServer(
             // contains anything sensitive.
             servePwaResource(session.uri)?.let { return it }
 
+            // The login page and logout must be reachable without being logged in.
+            when (session.uri) {
+                "/login" -> return serveLogin(session)
+                "/logout" -> return serveLogout(session)
+            }
+
             val sessionCookie = session.cookies.read(WebAuth.SESSION_COOKIE_NAME)
             val authorizedBySession = WebAuth.isSessionAuthorized(
                 settings.webAuthEnabled, settings.authUsername, settings.authPassword, sessionCookie
@@ -123,7 +131,18 @@ class WebServer(
                 settings.webAuthEnabled, settings.authUsername, settings.authPassword, headers["authorization"]
             )
             if (!authorizedBySession && !authorizedByBasic) {
-                return unauthorized()
+                return unauthorized(session)
+            }
+            // Only a real cookie login (auth on, credentials configured, no Basic header) is
+            // restricted: see WebAuth.requiresPostWithSessionCookie for why.
+            val credentialsRequired = settings.webAuthEnabled &&
+                settings.authUsername.isNotEmpty() && settings.authPassword.isNotEmpty()
+            if (credentialsRequired && !authorizedByBasic && session.method != Method.POST &&
+                WebAuth.requiresPostWithSessionCookie(session.uri)
+            ) {
+                return newFixedLengthResponse(
+                    Response.Status.METHOD_NOT_ALLOWED, MIME_PLAINTEXT, "Use POST"
+                ).also { it.addHeader("Allow", "POST") }
             }
 
             // Mutations should be POSTed. NanoHTTPD only populates `parameters` for a
@@ -134,13 +153,11 @@ class WebServer(
             }
 
             val response = processRequest(session)
-            // This request just proved it holds the current credentials via the Basic header
-            // (rather than an already-valid session cookie) -- hand it a permanent cookie so the
-            // browser's native login prompt never has to reappear until the password changes.
-            if (authorizedByBasic && !authorizedBySession) {
-                WebAuth.sessionCookieHeader(settings.authUsername, settings.authPassword)?.let {
-                    response.addHeader("Set-Cookie", it)
-                }
+            // Re-issue the login cookie on every page load so its 400-day lifetime (the most a
+            // browser will honor) keeps sliding forward -- a login never expires as long as the
+            // dashboard is opened at least once within that window.
+            if (WebAuth.isPageNavigation(session.method.name, headers["accept"])) {
+                addSessionCookie(response)
             }
             response
         } catch (e: Exception) {
@@ -176,13 +193,72 @@ class WebServer(
         }
     }
 
-    private fun unauthorized(): Response {
-        val response = newFixedLengthResponse(
-            Response.Status.UNAUTHORIZED, MIME_PLAINTEXT, "Authentication required"
-        )
-        response.addHeader("WWW-Authenticate", "Basic realm=\"$REALM\", charset=\"UTF-8\"")
-        return response
+    /**
+     * A browser opening a page is sent to `/login` (remembering where it was going); anything
+     * else -- `fetch()` calls, curl, NVRs -- gets a plain 401. Deliberately no `WWW-Authenticate`
+     * header: it would make the browser pop its native Basic-Auth dialog on top of the login page.
+     * Non-browser clients can still authenticate preemptively with a Basic header (`curl -u`).
+     */
+    private fun unauthorized(session: IHTTPSession): Response {
+        if (WebAuth.isPageNavigation(session.method.name, session.headers["accept"])) {
+            val target = session.uri + (session.queryParameterString?.let { "?$it" } ?: "")
+            return redirect("/login?next=" + URLEncoder.encode(target, "UTF-8"))
+        }
+        return newFixedLengthResponse(Response.Status.UNAUTHORIZED, MIME_PLAINTEXT, "Authentication required")
     }
+
+    /**
+     * `GET /login` shows the login form (or skips straight to `next` if already logged in);
+     * `POST /login` checks the submitted credentials and, on success, sets the permanent session
+     * cookie and redirects to `next`.
+     */
+    private fun serveLogin(session: IHTTPSession): Response {
+        val s = settings
+        if (session.method == Method.POST) {
+            session.parseBody(HashMap())
+            val next = WebAuth.safeRedirectTarget(session.parameters["next"]?.firstOrNull())
+            val username = session.parameters["username"]?.firstOrNull() ?: ""
+            val password = session.parameters["password"]?.firstOrNull() ?: ""
+            if (!s.webAuthEnabled || WebAuth.credentialsMatch(s.authUsername, s.authPassword, username, password)) {
+                return redirect(next).also { addSessionCookie(it) }
+            }
+            Log.w("WebServer", "Failed dashboard login from ${session.remoteIpAddress}")
+            Thread.sleep(LOGIN_FAILURE_DELAY_MS)
+            return loginPage(next, failed = true)
+        }
+        val next = WebAuth.safeRedirectTarget(session.parameters["next"]?.firstOrNull())
+        val alreadyLoggedIn = WebAuth.isSessionAuthorized(
+            s.webAuthEnabled, s.authUsername, s.authPassword, session.cookies.read(WebAuth.SESSION_COOKIE_NAME)
+        )
+        return if (alreadyLoggedIn) redirect(next) else loginPage(next, failed = false)
+    }
+
+    private fun loginPage(next: String, failed: Boolean): Response {
+        val html = loginTemplate
+            .replace("{{IP}}", WebAuth.escapeHtml(ipAddress))
+            .replace("{{NEXT}}", WebAuth.escapeHtml(next))
+            .replace("{{ERROR_DISPLAY}}", if (failed) "block" else "none")
+        val status = if (failed) Response.Status.UNAUTHORIZED else Response.Status.OK
+        return newFixedLengthResponse(status, MIME_HTML, html)
+    }
+
+    /** POST-only so a stray link or prefetch can't log the browser out. */
+    private fun serveLogout(session: IHTTPSession): Response {
+        if (session.method != Method.POST) return redirect("/")
+        return redirect("/login").also { it.addHeader("Set-Cookie", WebAuth.clearSessionCookieHeader()) }
+    }
+
+    /** Attaches a fresh session cookie for the *current* credentials, when dashboard auth is on. */
+    private fun addSessionCookie(response: Response) {
+        val s = settings
+        if (!s.webAuthEnabled) return
+        WebAuth.sessionCookieHeader(s.authUsername, s.authPassword)?.let { response.addHeader("Set-Cookie", it) }
+    }
+
+    private fun redirect(location: String): Response =
+        newFixedLengthResponse(Response.Status.REDIRECT_SEE_OTHER, MIME_PLAINTEXT, "").also {
+            it.addHeader("Location", location)
+        }
 
     private fun processRequest(session: IHTTPSession): Response {
         val uri = session.uri
@@ -261,7 +337,10 @@ class WebServer(
             val username = session.parameters["username"]?.get(0) ?: ""
             val password = session.parameters["password"]?.get(0) ?: ""
             settingUpdateHandler.handleAuth(enabled, username, password)
+            // The session cookie is derived from the credentials, so changing them just
+            // invalidated this browser's login -- hand it one for the new credentials.
             return newFixedLengthResponse(Response.Status.OK, MIME_PLAINTEXT, "Auth Updated")
+                .also { addSessionCookie(it) }
         }
 
         // JSON status endpoint
@@ -464,6 +543,7 @@ class WebServer(
             .replace("{{PORT}}", PORT.toString())
             .replace("{{COMMIT}}", BuildConfig.GIT_COMMIT)
             .replace("{{BUILD_TIME}}", BuildConfig.BUILD_TIME)
+            .replace("{{LOGOUT_DISPLAY}}", if (settings.webAuthEnabled) "block" else "none")
     }
 
     private fun formatBytes(bytes: Long): String {
@@ -509,6 +589,7 @@ class WebServer(
      * string literals so the markup/CSS/JS can be edited (and diffed) as what it is.
      */
     private val dashboardTemplate: String by lazy { loadAsset("web/dashboard.html") }
+    private val loginTemplate: String by lazy { loadAsset("web/login.html") }
     private val recordingsTemplate: String by lazy { loadAsset("web/recordings.html") }
     private val iceTemplate: String by lazy { loadAsset("web/ice.html") }
     private val h264ConverterJs: String by lazy { loadAsset("web/h264-converter.js") }

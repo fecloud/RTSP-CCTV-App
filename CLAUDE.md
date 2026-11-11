@@ -104,10 +104,14 @@ setting: add the field to `ServiceSettings`, persist it in
 
 ### Security model (read `WebAuth.kt` and the README "Security" section before touching auth)
 
-- Dashboard auth is Basic, on by default, with a `SecureRandom`-generated password shown
-  once on first run. `isAuthorized` intentionally fails *open* when auth is enabled but no
-  credentials are configured yet, to avoid locking the owner out — `MainActivity` is
-  responsible for seeding the generated password before that gap matters.
+- Dashboard auth is on by default, with a `SecureRandom`-generated password shown once on
+  first run. Browsers sign in on `/login` (`assets/web/login.html`), which sets a session
+  cookie derived from the current credentials and re-issued on every page load so it never
+  expires; non-browser clients use a preemptive Basic header. Unauthenticated responses
+  deliberately carry no `WWW-Authenticate`, so the browser's native dialog never appears.
+  `isAuthorized` intentionally fails *open* when auth is enabled but no credentials are
+  configured yet, to avoid locking the owner out — `MainActivity` is responsible for
+  seeding the generated password before that gap matters.
 - `CctvServerService` reads username/password/`webAuthEnabled` **live from
   `SettingsRepository`** in the `WebServer` callbacks rather than from its own cached
   fields — a prior bug (from a cache populated in `onCreate()` before `MainActivity`

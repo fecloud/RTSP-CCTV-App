@@ -175,8 +175,8 @@ This app puts a camera on your network. The defaults are chosen accordingly.
 
 | Control | Default | Notes |
 |---|---|---|
-| Web dashboard authentication | **On** | HTTP Basic. A strong password is generated on first run. |
-| Browser login persistence | **Permanent** | A cookie remembers a successful login until the password changes -- the native Basic-Auth prompt won't reappear. `curl`/script/NVR clients are unaffected; they keep authenticating via the header on every request. |
+| Web dashboard authentication | **On** | Browsers sign in on a `/login` page; `curl`/scripts/NVRs use HTTP Basic. A strong password is generated on first run. |
+| Browser login persistence | **Permanent** | Signing in sets a cookie that is renewed on every page load, so it never expires as long as the dashboard is opened at least once every 400 days (the longest lifetime browsers honor). It stops working only when the password changes or you press *Sign out*. |
 | RTSP authentication | Off | Enable under *Authentication*; applies to the RTSP stream. |
 | Cross-origin requests | **Rejected** | Stops a website you visit from driving the camera over your LAN. |
 | Credentials in cloud backup | **Excluded** | Preferences and snapshots are excluded from Auto Backup and device transfer. |
@@ -213,20 +213,30 @@ rather than a public issue.
 
 Base URL `http://<phone-ip>:8081`.
 
-**Authentication.** When the dashboard is secured (the default), every endpoint requires
-HTTP Basic credentials and returns `401` with a `WWW-Authenticate` header otherwise.
+**Authentication.** When the dashboard is secured (the default), every endpoint (except
+`/login`, `/logout`, and the PWA manifest/icons) requires either the session cookie set by
+the login page or HTTP Basic credentials. Without either, a browser opening a page is
+redirected to `/login?next=<page>`; everything else gets a plain `401` -- with no
+`WWW-Authenticate` header, so browsers never show their native login dialog. Non-browser
+clients send the Basic header preemptively:
 
 ```bash
 curl -u admin:<password> http://192.168.1.50:8081/status
 ```
 
-A browser that successfully authenticates once is handed a permanent session cookie (valid
-until the password changes) so it isn't asked again; this has no effect on `curl`/script/NVR
-clients, which always authenticate via the header.
+| Endpoint | Purpose |
+|---|---|
+| `GET /login?next=<path>` | Sign-in page (redirects straight to `next` if already signed in) |
+| `POST /login` | `username=<s>&password=<s>&next=<path>` -- on success sets the session cookie and redirects to `next` (same-origin paths only) |
+| `POST /logout` | Clears the session cookie and redirects to `/login` |
 
 **Verbs.** State-changing endpoints accept `POST` (preferred) and `GET` (kept for
-compatibility with existing scripts and NVR integrations). Requests carrying a
-cross-origin `Origin` header are rejected with `403`.
+compatibility with existing scripts and NVR integrations that send a Basic header). A
+request authenticated only by the browser's login cookie must use `POST` for
+`/action/*` and `/server/*` (`405` otherwise): the cookie is `SameSite=Lax` so that
+launching the dashboard from a home-screen icon stays signed in, and `Lax` cookies ride
+along on a cross-site link's GET. Requests carrying a cross-origin `Origin` header are
+rejected with `403`.
 
 ### Read
 
@@ -254,7 +264,7 @@ cross-origin `Origin` header are rejected with `403`.
 ### Live preview (MSE)
 
 The dashboard's live preview is MSE (Media Source Extensions), not a plain HTTP endpoint:
-`WS /ws` streams raw H.264, video only (subject to the same Origin/Basic-Auth checks as
+`WS /ws` streams raw H.264, video only (subject to the same Origin/cookie/Basic-Auth checks as
 every route above, checked once against the WebSocket upgrade request's headers). One
 browser tab opens one `/ws` connection; every connection is fed from the same encoder
 output -- any number of tabs can watch at once without a second hardware encode. There's no

@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>Sign in — CCTV Dashboard</title>
+    <link rel="manifest" href="/manifest.webmanifest"/>
+    <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png"/>
+    <link rel="apple-touch-icon" href="/icon-192.png"/>
+    <meta name="theme-color" content="#0f1117"/>
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        :root {
+            --bg: #0f1117;
+            --surface: #1a1d27;
+            --border: rgba(255,255,255,0.06);
+            --text: #e8eaed;
+            --text-secondary: #9aa0b0;
+            --accent: #00b894;
+            --danger: #e74c3c;
+            --radius: 16px;
+            --radius-sm: 10px;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 24px 16px;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        .card {
+            width: 100%;
+            max-width: 360px;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 32px 24px 24px;
+        }
+
+        h1 {
+            text-align: center;
+            font-size: 22px;
+            font-weight: 700;
+            letter-spacing: -0.5px;
+            background: linear-gradient(135deg, #00b894, #00cec9);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .subtitle {
+            text-align: center;
+            font-size: 13px;
+            color: var(--text-secondary);
+            margin: 6px 0 24px;
+        }
+
+        label {
+            display: block;
+            font-size: 13px;
+            color: var(--text-secondary);
+            margin-bottom: 6px;
+        }
+
+        input[type=text], input[type=password] {
+            width: 100%;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            color: var(--text);
+            font-size: 15px;
+            padding: 12px 14px;
+            margin-bottom: 16px;
+            outline: none;
+            transition: border-color 0.2s ease;
+        }
+        input:focus { border-color: var(--accent); }
+
+        .error {
+            display: {{ERROR_DISPLAY}};
+            background: rgba(231,76,60,0.12);
+            color: var(--danger);
+            border-radius: var(--radius-sm);
+            font-size: 13px;
+            padding: 10px 12px;
+            margin-bottom: 16px;
+        }
+
+        button {
+            width: 100%;
+            background: var(--accent);
+            color: #fff;
+            border: none;
+            border-radius: var(--radius-sm);
+            font-size: 15px;
+            font-weight: 600;
+            padding: 12px;
+            cursor: pointer;
+            transition: opacity 0.2s ease;
+        }
+        button:hover { opacity: 0.9; }
+
+        .footer {
+            text-align: center;
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-top: 16px;
+            opacity: 0.6;
+        }
+    </style>
+</head>
+<body>
+    <form class="card" method="post" action="/login">
+        <h1>CCTV Dashboard</h1>
+        <p class="subtitle">Sign in to continue</p>
+
+        <div class="error">Incorrect username or password.</div>
+
+        <input type="hidden" name="next" value="{{NEXT}}"/>
+
+        <label for="username">Username</label>
+        <input type="text" id="username" name="username" autocomplete="username"
+               autocapitalize="none" autocorrect="off" spellcheck="false" required autofocus/>
+
+        <label for="password">Password</label>
+        <input type="password" id="password" name="password" autocomplete="current-password" required/>
+
+        <button type="submit">Sign in</button>
+
+        <div class="footer">{{IP}} · stays signed in on this browser</div>
+    </form>
+</body>
+</html>

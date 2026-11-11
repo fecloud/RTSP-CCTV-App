@@ -107,18 +107,46 @@ object WebAuth {
         if (expectedUsername.isEmpty() || expectedPassword.isEmpty()) return true
 
         val credentials = parseBasicHeader(header) ?: return false
-        // Both comparisons always run -- no short-circuit, so timing does not reveal
-        // whether it was the username or the password that was wrong.
-        val userOk = constantTimeEquals(credentials.first, expectedUsername)
-        val passOk = constantTimeEquals(credentials.second, expectedPassword)
+        return credentialsMatch(expectedUsername, expectedPassword, credentials.first, credentials.second)
+    }
+
+    /**
+     * Checks a username/password pair (from the Basic header or the `/login` form) against the
+     * configured credentials. Both comparisons always run -- no short-circuit, so timing does not
+     * reveal whether it was the username or the password that was wrong. Callers handle the
+     * fail-open cases (auth disabled / no credentials configured) themselves.
+     */
+    fun credentialsMatch(
+        expectedUsername: String,
+        expectedPassword: String,
+        givenUsername: String,
+        givenPassword: String
+    ): Boolean {
+        if (expectedUsername.isEmpty() || expectedPassword.isEmpty()) return false
+        val userOk = constantTimeEquals(givenUsername, expectedUsername)
+        val passOk = constantTimeEquals(givenPassword, expectedPassword)
         return userOk and passOk
     }
 
-    /** Name of the persistent "stay logged in" cookie issued after a successful Basic-Auth request. */
+    /**
+     * Name of the persistent "stay logged in" cookie issued by the `/login` page.
+     *
+     * `SameSite=Lax`, not `Strict`: opening the dashboard from a home-screen icon (installed PWA
+     * or Chrome shortcut) reaches Chrome as an external VIEW intent, which Chrome treats as a
+     * cross-site navigation (`Sec-Fetch-Site: cross-site`) and so withholds `Strict` cookies --
+     * verified on-device, it made every launch land on `/login`. `Lax` cookies are still sent on
+     * top-level GET navigations; the CSRF that would otherwise open up is closed by
+     * [requiresPostWithSessionCookie] plus [isOriginAllowed].
+     */
     const val SESSION_COOKIE_NAME = "cctv_session"
 
-    /** ~10 years -- there is no server-side session store to expire, so this is effectively permanent. */
-    private const val SESSION_COOKIE_MAX_AGE_SECONDS = 315360000L
+    /**
+     * 400 days -- the longest lifetime Chrome (and the current cookie spec draft) will honor;
+     * anything longer is silently clamped to it. The login is made permanent not by this number
+     * but by re-issuing the cookie on every authorized page load (see `WebServer.serveHttp`), so
+     * the 400-day window keeps sliding forward as long as the dashboard is opened at all within it.
+     */
+    private const val SESSION_COOKIE_MAX_AGE_SECONDS = 400L * 24 * 60 * 60
 
     /**
      * Derives a bearer token from the *current* configured credentials rather than issuing and
@@ -160,16 +188,52 @@ object WebAuth {
     }
 
     /**
-     * The `Set-Cookie` header value to hand a client that just authenticated via Basic Auth, so
-     * its browser never has to show that login prompt again until the password changes. No
-     * `Secure` attribute -- this server is plain HTTP only. Null when there are no credentials
-     * configured yet to key the cookie to.
+     * The `Set-Cookie` header value to hand a browser that just logged in (or is renewing an
+     * existing login), so it stays logged in until the password changes. No `Secure` attribute
+     * -- this server is plain HTTP only. Null when there are no credentials configured yet to
+     * key the cookie to.
      */
     fun sessionCookieHeader(username: String, password: String): String? {
         if (username.isEmpty() || password.isEmpty()) return null
         val token = computeSessionToken(username, password)
-        return "$SESSION_COOKIE_NAME=$token; Max-Age=$SESSION_COOKIE_MAX_AGE_SECONDS; Path=/; HttpOnly; SameSite=Strict"
+        return "$SESSION_COOKIE_NAME=$token; Max-Age=$SESSION_COOKIE_MAX_AGE_SECONDS; Path=/; HttpOnly; SameSite=Lax"
     }
+
+    /** The `Set-Cookie` header value that deletes the session cookie (used by `/logout`). */
+    fun clearSessionCookieHeader(): String =
+        "$SESSION_COOKIE_NAME=; Max-Age=0; Path=/; HttpOnly; SameSite=Lax"
+
+    /**
+     * Where to send the browser after logging in: the `next` path it was bounced from, if that is
+     * a plain same-origin path. Anything else (absolute URLs, protocol-relative `//host`,
+     * backslash tricks, header-splitting characters, or `/login` itself) falls back to `/`, so
+     * the login page can't be used as an open redirect.
+     */
+    fun safeRedirectTarget(next: String?): String {
+        if (next.isNullOrEmpty() || !next.startsWith("/")) return "/"
+        if (next.startsWith("//")) return "/"
+        if (next.any { it == '\r' || it == '\n' || it == '\\' }) return "/"
+        if (next == "/login" || next.startsWith("/login?")) return "/"
+        return next
+    }
+
+    /**
+     * Whether [uri] changes server state. With a `Lax` session cookie, a link on another site
+     * would carry the cookie on a top-level GET, so cookie-authenticated requests to these paths
+     * must be POSTs (cross-site POSTs carry an `Origin` that [isOriginAllowed] rejects, and `Lax`
+     * withholds the cookie from them anyway). Basic-header clients (curl, NVRs) may keep using GET.
+     */
+    fun requiresPostWithSessionCookie(uri: String): Boolean =
+        uri.startsWith("/action/") || uri.startsWith("/server/")
+
+    /**
+     * Whether an unauthenticated request is a browser navigating to a page (and so should be
+     * redirected to `/login`) rather than an API/asset fetch or a non-browser client (which get
+     * a plain 401 instead). `fetch()` sends a wildcard `Accept`, so it is never mistaken for a
+     * page load.
+     */
+    fun isPageNavigation(method: String, acceptHeader: String?): Boolean =
+        method.equals("GET", ignoreCase = true) && acceptHeader?.contains("text/html") == true
 
     /**
      * Rejects cross-site requests. A browser attaches `Origin` on any cross-origin
