@@ -16,8 +16,8 @@
         <!-- See the note in values/themes.xml. -->
         <item name="colorSecondaryContainer">@color/teal_700</item>
         <item name="colorOnSecondaryContainer">@color/teal_200</item>
-        <!-- Status bar color. -->
-        <item name="android:statusBarColor">@color/surface_dark</item>
+        <!-- Transparent so the toolbar (drawn behind it) shows through; see MainActivity. -->
+        <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@color/surface_dark</item>
     </style>
 </resources>

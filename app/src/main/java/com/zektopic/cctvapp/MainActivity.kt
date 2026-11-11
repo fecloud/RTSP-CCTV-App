@@ -6,6 +6,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.content.res.Configuration
 import android.content.pm.PackageManager
 import android.net.ConnectivityManager
 import android.net.Uri
@@ -18,6 +19,10 @@ import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.updatePadding
 import com.google.android.material.slider.Slider
 import com.zektopic.cctvapp.camera.CameraResolutionUtil
 import com.zektopic.cctvapp.databinding.ActivityMainBinding
@@ -80,11 +85,34 @@ class MainActivity : AppCompatActivity() {
     private val fpsLabels = arrayOf("15 fps", "25 fps", "30 fps")
     private val fpsValues = intArrayOf(15, 25, 30)
 
+    /**
+     * Lays the window out behind the status bar so the bar shows the toolbar's own color
+     * (including its lift-on-scroll tint) instead of a separate fixed color. On API 35+ with
+     * targetSdk 35+ the system forces this anyway and ignores `android:statusBarColor`; doing
+     * it explicitly makes older versions look the same.
+     */
+    private fun applyEdgeToEdge() {
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        val isNight = (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==
+            Configuration.UI_MODE_NIGHT_YES
+        // Light toolbar in day mode needs dark status-bar icons to stay legible.
+        WindowCompat.getInsetsController(window, window.decorView).isAppearanceLightStatusBars = !isNight
+        ViewCompat.setOnApplyWindowInsetsListener(binding.root) { root, insets ->
+            val bars = insets.getInsets(
+                WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()
+            )
+            root.updatePadding(left = bars.left, right = bars.right, bottom = bars.bottom)
+            binding.appBar.updatePadding(top = bars.top)
+            insets
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         ServiceStateRepository.ensureLoaded(this)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        applyEdgeToEdge()
 
         resolutions = CameraResolutionUtil.getSupportedResolutions(this)
             .map { "${it.first}x${it.second}" }

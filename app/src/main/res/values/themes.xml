@@ -18,8 +18,8 @@
              mauve on an otherwise teal screen. -->
         <item name="colorSecondaryContainer">@color/teal_200</item>
         <item name="colorOnSecondaryContainer">@color/teal_800</item>
-        <!-- Status bar color. -->
-        <item name="android:statusBarColor">@color/teal_800</item>
+        <!-- Transparent so the toolbar (drawn behind it) shows through; see MainActivity. -->
+        <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@color/surface_light</item>
     </style>
 </resources>
