@@ -1,14 +1,8 @@
 package com.zektopic.cctvapp.web
 
 import android.content.Context
-import android.graphics.Bitmap
-import android.graphics.Canvas
-import android.graphics.drawable.AdaptiveIconDrawable
-import android.graphics.drawable.Drawable
-import android.os.Build
 import android.os.SystemClock
 import com.zektopic.cctvapp.BuildConfig
-import com.zektopic.cctvapp.R
 import com.zektopic.cctvapp.log.AppLog as Log
 import com.zektopic.cctvapp.camera.CameraResolutionUtil
 import com.zektopic.cctvapp.device.DeviceStatsUtil
@@ -24,10 +18,10 @@ import com.zektopic.cctvapp.webrtc.WebRtcIceServers
 import com.zektopic.cctvapp.webrtc.WebRtcSignalingSocket
 import fi.iki.elonen.NanoWSD
 import java.io.ByteArrayInputStream
-import java.io.ByteArrayOutputStream
 import java.io.InputStream
 import java.text.SimpleDateFormat
 import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
 
 /** One saved recording under app-private storage, as listed on the `/recordings` page. */
 data class RecordingEntry(val id: String, val displayName: String, val sizeBytes: Long, val dateAddedMillis: Long)
@@ -40,24 +34,17 @@ class WebServer(
     private val ipAddress: String get() = DeviceStatsUtil.getIpAddress(context)
 
     companion object {
-        /** Lets Chrome install the dashboard as a WebAPK -- only when served over HTTPS (e.g. behind a reverse proxy). */
-        private val PWA_MANIFEST = """
-            {
-              "name": "CCTV Dashboard",
-              "short_name": "CCTV",
-              "id": "/",
-              "start_url": "/",
-              "scope": "/",
-              "display": "standalone",
-              "background_color": "#0f1117",
-              "theme_color": "#0f1117",
-              "icons": [
-                {"src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any"},
-                {"src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any"},
-                {"src": "/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"}
-              ]
-            }
-        """.trimIndent()
+        /**
+         * Request path -> MIME type for the PWA manifest and icons under `assets/web/`. Lets
+         * Chrome install the dashboard as a WebAPK -- only when served over HTTPS (e.g. behind
+         * a reverse proxy).
+         */
+        private val PWA_RESOURCES = mapOf(
+            "/manifest.webmanifest" to "application/manifest+json",
+            "/icon-192.png" to "image/png",
+            "/icon-512.png" to "image/png",
+            "/icon-maskable-512.png" to "image/png",
+        )
 
         const val PORT = 8081
 
@@ -397,54 +384,22 @@ class WebServer(
         return newFixedLengthResponse(Response.Status.NOT_FOUND, MIME_PLAINTEXT, "Not Found")
     }
 
-    private fun servePwaResource(uri: String): Response? = when (uri) {
-        "/manifest.webmanifest" ->
-            newFixedLengthResponse(Response.Status.OK, "application/manifest+json", PWA_MANIFEST)
-        "/icon-192.png" -> pngResponse(icon192)
-        "/icon-512.png" -> pngResponse(icon512)
-        "/icon-maskable-512.png" -> pngResponse(iconMaskable512)
-        else -> null
-    }
-
-    private fun pngResponse(png: ByteArray): Response =
-        newFixedLengthResponse(Response.Status.OK, "image/png", ByteArrayInputStream(png), png.size.toLong()).also {
+    /**
+     * The PWA manifest and its icons, served as-is from `assets/web/`. The icons are
+     * generated from `mipmap-xxxhdpi/ic_launcher.png` (same artwork as the app icon):
+     * `icon-192`/`icon-512` are `purpose: any` (already clipped to a rounded shape),
+     * `icon-maskable-512` is full-bleed so the installing launcher can apply its own
+     * mask. Regenerate them if the launcher icon changes.
+     */
+    private fun servePwaResource(uri: String): Response? {
+        val mimeType = PWA_RESOURCES[uri] ?: return null
+        val bytes = pwaResourceCache.getOrPut(uri) { loadAssetBytes("web" + uri) }
+        return newFixedLengthResponse(Response.Status.OK, mimeType, ByteArrayInputStream(bytes), bytes.size.toLong()).also {
             it.addHeader("Cache-Control", "public, max-age=86400")
         }
-
-    /**
-     * Rasterizes the app's own launcher icon instead of shipping duplicate PNGs in `assets/`.
-     *
-     * Drawn as a whole, an [AdaptiveIconDrawable] comes out already clipped to this device's
-     * icon mask (transparent corners) -- fine for `purpose: any`. A `maskable` icon must
-     * instead be full-bleed so the installing launcher can apply its own mask, so for that
-     * the background and foreground layers are drawn directly across the whole canvas: the
-     * adaptive-icon 108dp grid keeps the artwork inside its central 72dp, comfortably within
-     * the PWA maskable safe zone (a circle of 80% diameter).
-     */
-    private fun renderLauncherIcon(size: Int, fullBleed: Boolean): ByteArray {
-        val drawable = requireNotNull(context.getDrawable(R.mipmap.ic_launcher))
-        val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
-        val canvas = Canvas(bitmap)
-        val layers: List<Drawable?> =
-            if (fullBleed && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && drawable is AdaptiveIconDrawable) {
-                listOf(drawable.background, drawable.foreground)
-            } else {
-                listOf(drawable)
-            }
-        layers.filterNotNull().forEach {
-            it.setBounds(0, 0, size, size)
-            it.draw(canvas)
-        }
-        return ByteArrayOutputStream().use { out ->
-            bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
-            bitmap.recycle()
-            out.toByteArray()
-        }
     }
 
-    private val icon192: ByteArray by lazy { renderLauncherIcon(192, fullBleed = false) }
-    private val icon512: ByteArray by lazy { renderLauncherIcon(512, fullBleed = false) }
-    private val iconMaskable512: ByteArray by lazy { renderLauncherIcon(512, fullBleed = true) }
+    private val pwaResourceCache = ConcurrentHashMap<String, ByteArray>()
 
     private fun escapeJson(s: String): String = s.replace("\\", "\\\\").replace("\"", "\\\"")
 
@@ -564,4 +519,7 @@ class WebServer(
 
     private fun loadAsset(path: String): String =
         context.assets.open(path).bufferedReader().use { it.readText() }
+
+    private fun loadAssetBytes(path: String): ByteArray =
+        context.assets.open(path).use { it.readBytes() }
 }
