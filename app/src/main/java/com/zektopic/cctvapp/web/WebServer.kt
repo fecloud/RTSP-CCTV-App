@@ -464,11 +464,12 @@ class WebServer(
     }
 
     /**
-     * The PWA manifest and its icons, served as-is from `assets/web/`. The icons are
-     * generated from `mipmap-xxxhdpi/ic_launcher.png` (same artwork as the app icon):
-     * `icon-192`/`icon-512` are `purpose: any` (already clipped to a rounded shape),
-     * `icon-maskable-512` is full-bleed so the installing launcher can apply its own
-     * mask. Regenerate them if the launcher icon changes.
+     * The PWA manifest and its icons, served as-is from `assets/web/`. The icons are a
+     * vector trace of `mipmap-xxxhdpi/ic_launcher.png` rasterized to PNG on a black
+     * background: `icon-192`/`icon-512` are `purpose: any` (rounded corners),
+     * `icon-maskable-512` is full-bleed so the installing launcher can apply its own mask.
+     * Keep them PNG: Chrome won't offer to install the PWA from an SVG-only manifest.
+     * Regenerate them if the launcher icon changes.
      */
     private fun servePwaResource(uri: String): Response? {
         val mimeType = PWA_RESOURCES[uri] ?: return null
