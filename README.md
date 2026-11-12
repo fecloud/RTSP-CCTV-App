@@ -342,7 +342,7 @@ first) would.
 | `webrtc_dynamic_turn_url` | string | Signaling server (`wss://…`) the dynamic TURN credential is fetched from |
 | `record_to_gallery_enabled` | bool | Record rotating segments to the app's private storage, browsable via `/recordings` |
 | `record_segment_minutes` | int 1–60 | Length of each recorded segment |
-| `record_storage_threshold_percent` | int 10–90 | Local storage usage above which the oldest recorded segments are deleted |
+| `record_storage_threshold_percent` | int 10–90 | Max size of the recordings folder, as a % of its storage partition's total capacity; the oldest segments are deleted once it's exceeded |
 
 </details>
 

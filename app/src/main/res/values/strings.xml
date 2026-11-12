@@ -53,7 +53,7 @@
     <string name="record_to_gallery_toggle">Record to Local Storage</string>
     <string name="record_to_gallery_hint">Saves rotating segments to app storage; browse them from the dashboard\'s Recordings page</string>
     <string name="record_segment_minutes_label">Segment Length (minutes)</string>
-    <string name="record_storage_threshold_percent_label">Storage Full Threshold (%)</string>
+    <string name="record_storage_threshold_percent_label">Recordings Size Limit (% of storage)</string>
 
     <string name="nav_settings">Settings</string>
 

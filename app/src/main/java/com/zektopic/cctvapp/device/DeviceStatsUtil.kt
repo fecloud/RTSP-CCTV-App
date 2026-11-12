@@ -6,7 +6,6 @@ import android.content.IntentFilter
 import android.net.ConnectivityManager
 import android.net.wifi.WifiManager
 import android.os.BatteryManager
-import android.os.StatFs
 import com.zektopic.cctvapp.log.AppLog as Log
 import java.io.File
 import java.net.Inet4Address
@@ -162,11 +161,5 @@ object DeviceStatsUtil {
         }.getOrNull()
 
         return hotspotIpv4Address ?: activeIpv4Address ?: "0.0.0.0"
-    }
-
-    fun usedPercent(statFs: StatFs): Int {
-        val total = statFs.totalBytes
-        if (total <= 0L) return 0
-        return (((total - statFs.availableBytes) * 100) / total).toInt()
     }
 }

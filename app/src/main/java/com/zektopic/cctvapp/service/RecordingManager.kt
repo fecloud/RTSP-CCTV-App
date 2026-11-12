@@ -4,7 +4,6 @@ import android.content.Context
 import android.os.StatFs
 import com.zektopic.cctvapp.log.AppLog as Log
 import com.pedro.library.base.recording.RecordController
-import com.zektopic.cctvapp.device.DeviceStatsUtil
 import com.zektopic.cctvapp.settings.ServiceStateRepository
 import com.zektopic.cctvapp.streaming.SharedCameraStream
 import java.io.File
@@ -123,29 +122,44 @@ class RecordingManager(
         return File(RecordingsStore.recordingsDir(context), fileName)
     }
 
+    /**
+     * Deletes the oldest segments while the recordings directory's own total size exceeds
+     * [recordStorageThresholdPercent] of its partition's total capacity. Measured against the
+     * directory, not the partition's overall usage, so space taken by the system and other
+     * apps doesn't count against the recording budget. The newest file is never deleted:
+     * during a segment rotation it's the segment currently being written.
+     */
     private fun enforceRetention() {
         try {
             val dir = RecordingsStore.recordingsDir(context)
             val files = dir.listFiles { f -> f.isFile && f.name.endsWith(".mp4") }
                 ?.sortedBy { it.lastModified() }
                 ?: emptyList()
+            if (files.size <= 1) return
 
-            val statFs = StatFs(dir.path)
+            val totalBytes = StatFs(dir.path).totalBytes
+            if (totalBytes <= 0L) return
+            val threshold = recordStorageThresholdPercent
+            val budgetBytes = totalBytes / 100 * threshold
+            var dirBytes = files.sumOf { it.length() }
+
             var deletedCount = 0
-            for (file in files) {
-                val usedPercent = DeviceStatsUtil.usedPercent(statFs)
-                if (usedPercent <= recordStorageThresholdPercent) break
+            for (file in files.dropLast(1)) {
+                if (dirBytes <= budgetBytes) break
+                val size = file.length()
                 val deleted = file.delete()
                 Log.d(
                     TAG,
-                    "Retention: usedPercent=$usedPercent > threshold=$recordStorageThresholdPercent, " +
-                        "deleted=$deleted file=${file.name}"
+                    "Retention: dirBytes=$dirBytes > budget=$budgetBytes ($threshold% of $totalBytes), " +
+                        "deleted=$deleted file=${file.name} size=$size"
                 )
-                if (deleted) deletedCount++
-                statFs.restat(dir.path)
+                if (deleted) {
+                    deletedCount++
+                    dirBytes -= size
+                }
             }
             if (deletedCount > 0) {
-                Log.d(TAG, "Retention: removed $deletedCount old segment(s) to stay under $recordStorageThresholdPercent% storage")
+                Log.d(TAG, "Retention: removed $deletedCount old segment(s); recordings now $dirBytes bytes, budget $budgetBytes")
             }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to enforce recording retention", e)
