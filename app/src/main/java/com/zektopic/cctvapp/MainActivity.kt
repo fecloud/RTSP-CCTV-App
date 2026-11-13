@@ -97,6 +97,7 @@ class MainActivity : AppCompatActivity() {
             Configuration.UI_MODE_NIGHT_YES
         // Light toolbar in day mode needs dark status-bar icons to stay legible.
         WindowCompat.getInsetsController(window, window.decorView).isAppearanceLightStatusBars = !isNight
+        applyMiuiDarkIcons(dark = !isNight)
         ViewCompat.setOnApplyWindowInsetsListener(binding.root) { root, insets ->
             val bars = insets.getInsets(
                 WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()
@@ -104,6 +105,30 @@ class MainActivity : AppCompatActivity() {
             root.updatePadding(left = bars.left, right = bars.right, bottom = bars.bottom)
             binding.appBar.updatePadding(top = bars.top)
             insets
+        }
+    }
+
+    /**
+     * MIUI's own status-bar icon switch, `Window.setExtraFlags(EXTRA_FLAG_STATUS_BAR_DARK_MODE, ...)`
+     * with the flag from the hidden `android.view.MiuiWindowManager$LayoutParams` class. MIUI
+     * builds (verified on a MI 5s / Android 8.0) ignore the framework's light-status-bar flag and
+     * the theme's `android:windowLightStatusBar`, leaving white icons on a white bar; this is the
+     * only channel they listen on. Reflection because the API isn't part of the public SDK --
+     * every non-MIUI device throws and lands in the catch.
+     */
+    private fun applyMiuiDarkIcons(dark: Boolean) {
+        try {
+            val params = Class.forName("android.view.MiuiWindowManager\$LayoutParams")
+            val darkModeFlag = params.getField("EXTRA_FLAG_STATUS_BAR_DARK_MODE").getInt(params)
+            window.javaClass
+                .getMethod(
+                    "setExtraFlags",
+                    Int::class.javaPrimitiveType,
+                    Int::class.javaPrimitiveType
+                )
+                .invoke(window, if (dark) darkModeFlag else 0, darkModeFlag)
+        } catch (_: Throwable) {
+            // Not MIUI.
         }
     }
 
